@@ -98,7 +98,9 @@ const platformServer = createServer(async (request, response) => {
     const taskInput = JSON.parse(Buffer.concat(chunks).toString('utf8'))
     submittedTaskInput = taskInput
     taskState = taskInput.prompt.includes('approval') ? 'WAITING_APPROVAL'
-      : taskInput.prompt.includes('unknown') ? 'OUTCOME_UNKNOWN' : 'QUEUED'
+      : taskInput.prompt.includes('unknown') ? 'OUTCOME_UNKNOWN'
+        : taskInput.prompt.includes('failed') ? 'FAILED'
+          : taskInput.prompt.includes('success') ? 'SUCCEEDED' : 'QUEUED'
     response.end(JSON.stringify({ code: 0, data: { id: 'task-1', state: taskState, prompt: taskInput.prompt,
       promptPreview: '检查本地工作台连接', sessionId: 'session-1', requestId: 'request-1' } }))
   } else if (request.url === '/api/agent/tasks/task-1/cancel' && request.method === 'POST') {
@@ -203,6 +205,19 @@ try {
   await window.getByText('这项任务需要租户管理员审批').waitFor()
   assert.equal(await window.getByRole('button', { name: '批准继续' }).count(), 0,
     'non-admin users must not be offered an approval action')
+
+  await window.getByRole('button', { name: '开始工作' }).click()
+  await window.locator('textarea.prompt').fill('failed task')
+  await window.getByRole('button', { name: /提交任务/u }).click()
+  await window.locator('.task-detail-head .status-pill').filter({ hasText: '失败' }).waitFor()
+  assert.equal(await window.locator('.followup').count(), 0,
+    'failed tasks must not offer follow-up when the platform contract only accepts successful tasks')
+
+  await window.getByRole('button', { name: '开始工作' }).click()
+  await window.locator('textarea.prompt').fill('successful task')
+  await window.getByRole('button', { name: /提交任务/u }).click()
+  await window.locator('.task-detail-head .status-pill').filter({ hasText: '已完成' }).waitFor()
+  await window.locator('.followup').waitFor()
 
   const sameOrigin = await window.evaluate(async () => await window.hyperweave.request({ path: '/api/probe' }))
   assert.equal(sameOrigin, 'platform-ok', 'same-origin HyperWeave request should reach the platform')
