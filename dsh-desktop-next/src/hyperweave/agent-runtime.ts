@@ -1,4 +1,6 @@
-import { HyperWeaveClient } from './client.ts'
+export interface HyperWeaveRequestClient {
+  request<T>(path: string, init?: RequestInit): Promise<T>
+}
 
 export interface AgentTaskInput {
   readonly agentProfileId?: string
@@ -25,7 +27,7 @@ export interface AgentExecutionProvider {
 export class HyperWeaveAgentProvider implements AgentExecutionProvider {
   readonly kind = 'platform' as const
 
-  constructor(private readonly api: HyperWeaveClient) {}
+  constructor(private readonly api: HyperWeaveRequestClient) {}
 
   submit(input: AgentTaskInput): Promise<AgentTaskReceipt> {
     return this.api.request('/api/agent/tasks', {

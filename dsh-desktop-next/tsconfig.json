@@ -39,6 +39,7 @@
     "tsdown.config.ts",
     "vitest.config.ts",
     "src/**/*.tsx",
-    "vite.native-ui.config.ts"
+    "vite.native-ui.config.ts",
+    "vite.hyperweave-ui.config.ts"
   ]
 }

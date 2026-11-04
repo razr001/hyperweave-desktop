@@ -22,18 +22,18 @@ The source checkout remains an independent working fork based on the pinned upst
 | DSH plugin IPC/extension bridge and community/official markets | Exclude and replace with platform-owned capabilities | Skills and business plugins are managed and authorized by HyperWeave. The client loads these through the same configured platform origin; it does not install arbitrary local packages or scripts. |
 | DSH updater and release endpoints | Exclude | No DSH update checker or download endpoint is bundled or started. The first release receives application updates through the organization’s managed distribution process; automatic updates are not implemented. |
 | DSH telemetry and crash reporting | Exclude | The HyperWeave entry does not import DSH telemetry or reporting modules. No DSH telemetry endpoint is allowed by the renderer network policy. |
-| Reusable visual UI | Prefer platform UI served by HyperWeave | Login, task history/events, approvals, uploads, Agent roles, Skills/plugins, and artifacts use the platform’s existing authenticated UI and APIs, avoiding a second client-side implementation of the platform workflow. |
+| Reusable visual UI | Build a local desktop workbench; use platform APIs | The packaged renderer has first-party login, role Agent, capability catalog, file upload, task progress, approval, follow-up, and artifact screens. It does not load the HyperWeave console. |
 
 ## Runtime and network boundary
 
-- `src/hyperweave/main.ts` is a separate Electron entry point. The package staging script includes only its compiled output and minimal metadata.
-- The first release has no local Agent runtime. `src/hyperweave/agent-runtime.ts` defines a task-provider boundary and the platform implementation submits the stable task payload with `agentProfileId` and `knowledgeBaseIds`.
-- The configured platform must use HTTPS, except loopback development addresses. Renderer requests to other origins, external navigation, new windows, and cross-origin redirects are denied.
+- `src/hyperweave/main.ts` is a separate Electron entry point. The package staging script includes only its compiled output, the local workbench, the narrow preload bridge, and required metadata/licensing.
+- The first release has no local Agent runtime. `src/hyperweave/agent-runtime.ts` is the task-provider boundary used by the main-process IPC; its platform provider submits `agentProfileId` and `knowledgeBaseIds` to the existing task contract.
+- The configured platform must use HTTPS, except loopback development addresses. The local renderer cannot make network requests. The main process accepts only `/api/` paths on the configured origin, refuses redirects, and blocks external navigation, new windows, and non-local renderer requests.
 - There is no desktop auto-update service in this build. This avoids introducing a second service URL before HyperWeave defines a platform-managed update manifest and artifact contract.
 
 ## License and packaging check
 
-The HyperWeave app is staged into `.hyperweave-package` rather than packaging the DSH workspace. The build-only `sharp` tool renders the HyperWeave mark into Windows ICO, macOS ICNS, and Linux PNG assets; it is not a runtime dependency of the staged package. `scripts/verify-hyperweave-package.mjs` checks those icon containers, the ASAR allowlist, and that Electron and Chromium license files are present beside the app. Other build-only tools such as Electron Builder and `@electron/asar` are also absent from the runtime package. This is a focused check of the produced HyperWeave desktop artifact, not a legal audit of every dependency in the upstream DSH development workspace.
+The HyperWeave app is staged into `.hyperweave-package` rather than packaging the DSH workspace. The build-only `sharp` tool renders the HyperWeave mark into Windows ICO, macOS ICNS, and Linux PNG assets; it is not a runtime dependency of the staged package. `scripts/verify-hyperweave-package.mjs` checks those icon containers, the local UI/preload allowlist, and that upstream, React/Scheduler, Electron, and Chromium license files are included. Other build-only tools such as Electron Builder and `@electron/asar` are absent from the runtime package. This is a focused check of the produced HyperWeave desktop artifact, not a legal audit of every dependency in the upstream DSH development workspace.
 
 ## Deferred verification
 

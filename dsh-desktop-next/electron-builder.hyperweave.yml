@@ -7,8 +7,11 @@ directories:
   output: ../release/hyperweave
 files:
   - hyperweave-main.js
+  - preload.cjs
+  - ui/**
   - package.json
   - LICENSE.upstream
+  - LICENSES.third-party.txt
 extraMetadata:
   name: hyperweave-desktop
   main: hyperweave-main.js

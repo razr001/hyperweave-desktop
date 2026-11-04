@@ -13,8 +13,11 @@ const targetPlatform = process.argv[2] || process.platform
 const appAsar = appAsarByPlatform[targetPlatform]
 assert.ok(appAsar, `Unsupported packaging platform: ${targetPlatform}`)
 
-const files = listPackage(appAsar).map(path => path.replaceAll('\\', '/')).sort()
-assert.deepEqual(files, ['/LICENSE.upstream', '/hyperweave-main.js', '/package.json'])
+const files = listPackage(appAsar).map(path => path.replaceAll('\\', '/')).filter(path => path !== '/ui').sort()
+assert.ok(files.includes('/ui/index.html'), 'the package must contain the local workbench UI')
+assert.ok(files.includes('/preload.cjs'), 'the package must contain the restricted IPC bridge')
+assert.deepEqual(files.filter(path => !path.startsWith('/ui/')),
+  ['/LICENSE.upstream', '/LICENSES.third-party.txt', '/hyperweave-main.js', '/package.json', '/preload.cjs'])
 const staged = join('.hyperweave-package')
 const [ico, icns, png] = await Promise.all([
   readFile(join(staged, 'hyperweave.ico')),
@@ -38,6 +41,9 @@ assert.match(packageInfo.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u)
 assert.equal(packageInfo.version, process.env.HYPERWEAVE_DESKTOP_VERSION ?? '0.1.0')
 assert.equal(packageInfo.name, 'hyperweave-desktop')
 assert.equal(packageInfo.desktopName, 'hyperweave.desktop')
+const ui = extractFile(appAsar, 'ui/index.html').toString('utf8')
+assert.match(ui, /Content-Security-Policy/u)
+assert.match(ui, /connect-src 'none'/u)
 await readFile(appAsar.replace(/resources[\\/]app\.asar$/u, 'LICENSE.electron.txt'))
 await readFile(appAsar.replace(/resources[\\/]app\.asar$/u, 'LICENSES.chromium.html'))
-console.log(`Verified remote-only HyperWeave package: ${appAsar}`)
+console.log(`Verified isolated HyperWeave Desktop package: ${appAsar}`)

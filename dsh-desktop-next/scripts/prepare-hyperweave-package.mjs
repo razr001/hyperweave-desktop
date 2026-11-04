@@ -1,5 +1,5 @@
 /** Stages a minimal app so electron-builder cannot collect Harness production dependencies. */
-import { copyFile, mkdir, writeFile } from 'node:fs/promises'
+import { copyFile, cp, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
@@ -8,6 +8,9 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 const appDir = join(root, '.hyperweave-package')
 await mkdir(appDir, { recursive: true })
 await copyFile(join(root, 'lib', 'hyperweave-main.js'), join(appDir, 'hyperweave-main.js'))
+await copyFile(join(root, 'preload.cjs'), join(appDir, 'preload.cjs'))
+await copyFile(join(root, 'LICENSES.third-party.txt'), join(appDir, 'LICENSES.third-party.txt'))
+await cp(join(root, 'dist', 'hyperweave-ui'), join(appDir, 'ui'), { recursive: true, force: true })
 await copyFile(join(root, 'LICENSE.upstream'), join(appDir, 'LICENSE.upstream'))
 await copyFile(join(root, 'electron-builder.hyperweave.yml'), join(appDir, 'electron-builder.hyperweave.yml'))
 const logo = join(root, 'assets', 'hyperweave-app-icon.svg')
@@ -55,5 +58,5 @@ const version = process.env.HYPERWEAVE_DESKTOP_VERSION ?? '0.1.0'
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version))
   throw new TypeError('HYPERWEAVE_DESKTOP_VERSION must be a valid semantic version')
 await writeFile(join(appDir, 'package.json'), `${JSON.stringify({ name: 'hyperweave-desktop', version, private: true,
-  author: 'HyperWeave', desktopName: 'hyperweave.desktop', description: 'HyperWeave remote-first desktop client',
+  author: 'HyperWeave', desktopName: 'hyperweave.desktop', description: 'HyperWeave secure Agent workbench',
   license: 'MIT', main: 'hyperweave-main.js' }, null, 2)}\n`)

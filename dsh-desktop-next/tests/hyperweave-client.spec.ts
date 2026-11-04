@@ -53,5 +53,7 @@ describe('HyperWeave desktop network boundary', () => {
     expect(isAllowedPlatformRequest(origin, 'https://cdn.example.test/app.js')).toBe(false)
     expect(isAllowedPlatformRequest(origin, 'https://hw.example.test.evil.test/api')).toBe(false)
     expect(isAllowedPlatformRequest(origin, 'file:///C:/private.txt')).toBe(false)
+    expect(isAllowedPlatformRequest(origin, 'file:///C:/workbench/main.js', 'C:/workbench')).toBe(true)
+    expect(isAllowedPlatformRequest(origin, 'file:///C:/private.txt', 'C:/workbench')).toBe(false)
   })
 })
