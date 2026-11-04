@@ -1,5 +1,7 @@
 # HyperWeave Desktop mode
 
+Business plugins are deferred by the user as of 2026-11-04, pending a possible architecture change. Existing plugin interfaces are retained, but live plugin publication/execution/revocation is not an accepted feature of this delivery. No Kata setup is needed for the current desktop acceptance scope.
+
 The `start:hyperweave` entry is a standalone HyperWeave workbench rendered from local bundled assets. It does not load or wrap the platform console, and it does not import or start the DSH `NextDesktopRuntime`, Host process, Harness profile, or plugin loader. A sandboxed Electron window exposes a narrow IPC bridge; the main process sends authenticated requests only to the administrator-configured HyperWeave origin and denies external navigation and renderer network access.
 
 Configure the platform URL with `HYPERWEAVE_PLATFORM_URL` or create `hyperweave-desktop.json` in Electron's `userData` directory:
