@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
@@ -46,6 +46,12 @@ const platformServer = createServer(async (request, response) => {
     response.end()
     return
   }
+  if (request.url === '/api/agent/tasks/task-1/result') {
+    const acceptsText = request.headers.accept?.includes('*/*') || request.headers.accept?.includes('text/plain')
+    response.writeHead(acceptsText ? 200 : 406, { 'Content-Type': 'text/plain' })
+    response.end(acceptsText ? 'verified task result' : 'Not Acceptable')
+    return
+  }
   response.writeHead(200, { 'Content-Type': 'application/json' })
   if (request.url === '/api/tenant/auth/login' && request.method === 'POST') {
     response.end(JSON.stringify({ code: 0, data: { access_token: 'test-access-token', refresh_token: 'test-refresh-token',
@@ -84,7 +90,7 @@ const platformServer = createServer(async (request, response) => {
     const chunks = []
     for await (const chunk of request) chunks.push(chunk)
     const uploaded = Buffer.concat(chunks).toString('utf8')
-    assert.match(uploaded, /name="notes\.txt"/u, 'selected local file should be sent as a named multipart upload')
+    assert.match(uploaded, /name="notes\.pdf"/u, 'selected local file should be sent as a named multipart upload')
     assert.match(String(request.headers['content-type']), /multipart\/form-data; boundary=/u)
     uploadedFiles++
     response.end(JSON.stringify({ code: 0, data: { id: 'version-1', ingestion_state: 'QUEUED' } }))
@@ -178,6 +184,11 @@ try {
   await window.locator('.task-composer select').selectOption(savedProfiles[0].id)
   await window.locator('input[type="file"]').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('private local notes') })
   await window.getByRole('button', { name: /安全上传/u }).click()
+  await window.getByText('平台支持 PDF、DOCX、PPTX、XLSX、PNG 和 JPG 文件，请移除其他格式后重试。').waitFor()
+  assert.equal(knowledgeBases.length, 0, 'unsupported formats must not create remote knowledge bases')
+  assert.equal(uploadedFiles, 0, 'unsupported formats must not upload')
+  await window.locator('input[type="file"]').setInputFiles({ name: 'notes.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 private local notes') })
+  await window.getByRole('button', { name: /安全上传/u }).click()
   await window.getByText('已将 1 个文件提交到平台知识库').waitFor()
   assert.equal(uploadedFiles, 1, 'the selected local file should upload to the authorized HyperWeave knowledge base')
 
@@ -218,6 +229,14 @@ try {
   await window.getByRole('button', { name: /提交任务/u }).click()
   await window.locator('.task-detail-head .status-pill').filter({ hasText: '已完成' }).waitFor()
   await window.locator('.followup').waitFor()
+  const resultPath = join(temp, 'task-result.txt')
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = async () => ({ canceled: false, filePath })
+  }, resultPath)
+  assert.equal(await window.evaluate(() => window.hyperweave.download({
+    path: '/api/agent/tasks/task-1/result', fileName: 'task-result.txt',
+  })), true)
+  assert.equal(await readFile(resultPath, 'utf8'), 'verified task result')
 
   const sameOrigin = await window.evaluate(async () => await window.hyperweave.request({ path: '/api/probe' }))
   assert.equal(sameOrigin, 'platform-ok', 'same-origin HyperWeave request should reach the platform')

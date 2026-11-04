@@ -138,7 +138,8 @@ async function savePlatformArtifact(path: string, fileName: string, retryAuth = 
   if (!path.startsWith('/api/') || path.startsWith('//')) throw new TypeError('仅允许 HyperWeave /api 接口')
   const target = new URL(path, platformUrl)
   if (target.origin !== new URL(platformUrl).origin) throw new TypeError('请求地址超出管理员配置的平台')
-  const headers = new Headers({ Accept: 'application/octet-stream' })
+  // Result endpoints produce text/plain; artifacts may use their original MIME type.
+  const headers = new Headers({ Accept: '*/*' })
   if (tokens?.accessToken) headers.set('Authorization', `Bearer ${tokens.accessToken}`)
   const response = await fetch(target, { headers, redirect: 'manual' })
   if (response.status >= 300 && response.status < 400) throw new Error('平台接口拒绝跨站重定向')
