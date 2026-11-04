@@ -27,6 +27,7 @@ let approvedTasks = 0
 let reviewState = 'WAITING_APPROVAL'
 let approvalDetailUnavailable = true
 let skillAvailable = true
+let taskEventsUnavailable = false
 const skillId = '2a000000-0000-4000-8000-000000000001'
 const pluginId = '2a000000-0000-4000-8000-000000000002'
 const knowledgeBaseId = '2a000000-0000-4000-8000-000000000003'
@@ -146,7 +147,8 @@ const platformServer = createServer(async (request, response) => {
     taskState = 'RUNNING'
     response.end(JSON.stringify({ code: 0, data: { id: 'task-1', state: taskState, prompt: 'unknown task' } }))
   } else if (request.url?.startsWith('/api/agent/tasks/task-1/events')) {
-    response.end(JSON.stringify({ code: 0, data: [] }))
+    response.end(JSON.stringify(taskEventsUnavailable ? { code: 503, message: 'task events unavailable' }
+      : { code: 0, data: [{ id: 1, type: 'STATE', message: '平台已接收任务', occurredAt: new Date().toISOString() }] }))
   } else if (request.url === '/api/agent/tasks/task-1/artifacts') {
     response.end(JSON.stringify({ code: 0, data: [] }))
   } else if (request.url === '/api/agent/tasks/task-1') {
@@ -226,6 +228,18 @@ try {
   assert.equal(authenticatedTaskRequests, 1, 'task submission should use the authenticated platform session')
   assert.equal(submittedTaskInput.agentProfileId, savedProfiles[0].id, 'task submissions should include the selected role profile')
   assert.deepEqual(submittedTaskInput.knowledgeBaseIds, [knowledgeBaseId], 'task submissions should include the selected knowledge scope')
+  await window.getByText('平台已接收任务', { exact: true }).waitFor()
+  taskEventsUnavailable = true
+  await window.getByRole('status').filter({ hasText: '暂时无法同步任务' }).waitFor()
+  assert.equal(await window.getByText('平台已接收任务', { exact: true }).count(), 1,
+    'partial network failure must preserve the last valid event history')
+  assert.equal(await window.locator('.task-detail-head .status-pill').textContent(), '排队中')
+  taskState = 'RUNNING'
+  taskEventsUnavailable = false
+  await window.locator('.task-detail-head .status-pill').filter({ hasText: '执行中' }).waitFor()
+  await window.getByRole('status').filter({ hasText: '暂时无法同步任务' }).waitFor({ state: 'detached' })
+  assert.equal(authenticatedTaskRequests, 1, 'reconnecting must not resubmit the task')
+  assert.equal(recoveredTasks, 0, 'reconnecting must not invoke execution recovery automatically')
   await window.getByRole('button', { name: '停止任务' }).click()
   await window.locator('.task-detail-head .status-pill').filter({ hasText: '已取消' }).waitFor()
   assert.equal(cancelledTasks, 1, 'the workbench should submit task cancellation to HyperWeave')
