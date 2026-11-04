@@ -59,7 +59,7 @@ try {
   await page.getByRole('heading', { name: '今天想完成什么？' }).waitFor()
   console.log('Real platform login passed')
   const skill = skillId ? await page.evaluate(async id =>
-    (await window.hyperweave.request({ path: '/api/skills' })).find(s => s.id === id), skillId) : null
+    (await window.hyperweave.request({ path: '/api/skills/catalog' })).find(s => s.id === id), skillId) : null
   if (skillId) assert.ok(skill?.enabled && skill.active_version, 'Provide an enabled published test Skill')
   const name = `Desktop live researcher ${Date.now()}`
   await page.getByRole('button', { name: /我的 Agent/u }).click()

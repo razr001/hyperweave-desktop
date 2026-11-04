@@ -26,6 +26,7 @@ let pendingApprovalRequests = 0
 let approvedTasks = 0
 let reviewState = 'WAITING_APPROVAL'
 let approvalDetailUnavailable = true
+let skillAvailable = true
 const skillId = '2a000000-0000-4000-8000-000000000001'
 const pluginId = '2a000000-0000-4000-8000-000000000002'
 const knowledgeBaseId = '2a000000-0000-4000-8000-000000000003'
@@ -69,7 +70,8 @@ const platformServer = createServer(async (request, response) => {
     response.end(JSON.stringify({ code: 0, data: { plugins: [{ pluginId, pluginKey: 'ledger-export', versionId: '2a000000-0000-4000-8000-000000000004', version: '1.0.0', description: 'Ledger export' }], nextPluginKey: null } }))
   } else if (request.url === '/api/agent/profiles' && request.method === 'GET') {
     response.end(JSON.stringify({ code: 0, data: savedProfiles }))
-  } else if (request.url === '/api/agent/profiles' && request.method === 'POST') {
+  } else if ((request.url === '/api/agent/profiles' && request.method === 'POST')
+    || (request.url === `/api/agent/profiles/${savedProfiles[0]?.id}` && request.method === 'PUT')) {
     const chunks = []
     for await (const chunk of request) chunks.push(chunk)
     const input = JSON.parse(Buffer.concat(chunks).toString('utf8'))
@@ -78,8 +80,8 @@ const platformServer = createServer(async (request, response) => {
       skillIds: input.skill_ids, pluginIds: input.plugin_ids, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
     savedProfiles = [profile]
     response.end(JSON.stringify({ code: 0, data: profile }))
-  } else if (request.url === '/api/skills') {
-    response.end(JSON.stringify({ code: 0, data: [{ id: skillId, name: 'Research Notes', description: 'Summarize uploaded notes', enabled: true, activeVersion: 1 }] }))
+  } else if (request.url === '/api/skills/catalog') {
+    response.end(JSON.stringify({ code: 0, data: skillAvailable ? [{ id: skillId, name: 'Research Notes', description: 'Summarize uploaded notes', enabled: true, activeVersion: 1 }] : [] }))
   } else if (request.url === '/api/rag/knowledge-bases' && request.method === 'GET') {
     response.end(JSON.stringify({ code: 0, data: knowledgeBases }))
   } else if (request.url === '/api/rag/knowledge-bases' && request.method === 'POST') {
@@ -190,10 +192,9 @@ try {
   await window.locator('input[type="password"]').fill('test-password')
   await window.getByRole('button', { name: /登录 HyperWeave/u }).click()
   await window.getByRole('heading', { name: '今天想完成什么？' }).waitFor()
-  assert.equal(authenticatedPluginCatalogRequests, 1, 'the workbench should load the authenticated platform plugin catalog')
-
   await window.getByRole('button', { name: /Skills 与插件/u }).click()
   await window.getByText('ledger-export', { exact: true }).waitFor()
+  assert.equal(authenticatedPluginCatalogRequests, 1, 'the workbench should load the authenticated platform plugin catalog')
   await window.getByRole('button', { name: /我的 Agent/u }).click()
   await window.getByRole('button', { name: /新建角色/u }).click()
   await window.getByLabel('角色名称').fill('Evidence Researcher')
@@ -269,6 +270,16 @@ try {
   assert.equal(sameOrigin, 'platform-ok', 'same-origin HyperWeave request should reach the platform')
 
   assert.equal(pendingApprovalRequests, 0, 'ordinary users must not request the administrator queue')
+  skillAvailable = false
+  await window.reload()
+  await window.getByRole('button', { name: /我的 Agent/u }).click()
+  await window.locator('.profile-card').first().getByRole('button', { name: '编辑', exact: true }).click()
+  const unavailableSkill = window.locator('.binding-group').first().getByLabel(/不可用 Skill/u)
+  await unavailableSkill.click()
+  await unavailableSkill.waitFor({ state: 'detached' })
+  await window.getByRole('button', { name: '保存角色', exact: true }).click()
+  await window.locator('.modal-card').waitFor({ state: 'detached' })
+  assert.deepEqual(savedProfiles[0].skillIds, [], 'users can remove retained unavailable capabilities')
   await window.getByRole('button', { name: /退出登录/u }).click()
   sessionRole = 'TENANT_ADMIN'
   await window.locator('input[type="email"]').fill('admin@example.test')
