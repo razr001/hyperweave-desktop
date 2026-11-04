@@ -12,6 +12,7 @@ const entry = join(root, 'lib', 'hyperweave-main.js')
 const temp = await mkdtemp(join(tmpdir(), 'hyperweave-network-'))
 let blockedOriginRequests = 0
 let authenticatedTaskRequests = 0
+let authenticatedPluginCatalogRequests = 0
 let cancelledTasks = 0
 let recoveredTasks = 0
 let taskState = 'QUEUED'
@@ -44,6 +45,10 @@ const platformServer = createServer(async (request, response) => {
       user: { id: 'user-1', email: 'agent@example.test', display_name: '测试用户', role: 'USER' } } }))
   } else if (request.url === '/api/tenant/auth/me') {
     response.end(JSON.stringify({ code: 0, data: { id: 'user-1', email: 'agent@example.test', display_name: '测试用户', role: 'USER' } }))
+  } else if (request.url?.startsWith('/api/agent/plugins/catalog')) {
+    if (request.headers.authorization !== 'Bearer test-access-token') authenticatedPluginCatalogRequests = -1
+    else authenticatedPluginCatalogRequests++
+    response.end(JSON.stringify({ code: 0, data: { plugins: [], nextPluginKey: null } }))
   } else if (['/api/agent/profiles', '/api/skills', '/api/agent/plugins', '/api/rag/knowledge-bases'].includes(request.url ?? '')) {
     response.end(JSON.stringify({ code: 0, data: [] }))
   } else if (request.url === '/api/agent/tasks' && request.method === 'GET') {
@@ -112,6 +117,7 @@ try {
   await window.locator('input[type="password"]').fill('test-password')
   await window.getByRole('button', { name: /登录 HyperWeave/u }).click()
   await window.getByRole('heading', { name: '今天想完成什么？' }).waitFor()
+  assert.equal(authenticatedPluginCatalogRequests, 1, 'the workbench should load the authenticated platform plugin catalog')
 
   await window.locator('textarea.prompt').fill('检查本地工作台连接')
   await window.getByRole('button', { name: /提交任务/u }).click()

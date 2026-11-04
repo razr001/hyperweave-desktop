@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { extractFile, listPackage } from '@electron/asar'
 
 const output = join('release', 'hyperweave')
+const macAppAsar = ['mac', 'mac-arm64', 'mac-x64', 'mac-universal']
+  .map(directory => join(output, directory, 'HyperWeave.app', 'Contents', 'Resources', 'app.asar'))
+  .find(existsSync)
 const appAsarByPlatform = {
   win32: join(output, 'win-unpacked', 'resources', 'app.asar'),
   linux: join(output, 'linux-unpacked', 'resources', 'app.asar'),
-  darwin: join(output, 'mac', 'HyperWeave.app', 'Contents', 'Resources', 'app.asar'),
+  darwin: macAppAsar,
 }
 const targetPlatform = process.argv[2] || process.platform
 const appAsar = appAsarByPlatform[targetPlatform]

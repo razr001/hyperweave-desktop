@@ -43,11 +43,27 @@ function App() {
 
   const request = useCallback(<T,>(path: string, method = 'GET', body?: unknown, headers?: Record<string, string>) =>
     api.request<T>({ path, method, body, headers }), [])
+  const loadPluginCatalog = useCallback(async () => {
+    const plugins: AnyRecord[] = []
+    const seenCursors = new Set<string>()
+    let cursor: string | undefined
+    for (let page = 0; page < 100; page++) {
+      const query = new URLSearchParams({ limit: '20' })
+      if (cursor) query.set('afterPluginKey', cursor)
+      const result = await request<AnyRecord>(`/api/agent/plugins/catalog?${query.toString()}`)
+      plugins.push(...toArray<AnyRecord>(result.plugins))
+      const next = value(result, 'nextPluginKey')
+      if (typeof next !== 'string' || !next || seenCursors.has(next)) break
+      seenCursors.add(next)
+      cursor = next
+    }
+    return plugins
+  }, [request])
 
   const loadWorkspace = useCallback(async () => {
     const results = await Promise.allSettled([
       request<AnyRecord[]>('/api/agent/profiles'), request<AnyRecord[]>('/api/skills'),
-      request<AnyRecord[]>('/api/agent/plugins'), request<KnowledgeBase[]>('/api/rag/knowledge-bases'),
+      loadPluginCatalog(), request<KnowledgeBase[]>('/api/rag/knowledge-bases'),
       request<AnyRecord>('/api/agent/tasks'),
     ])
     if (results[0].status === 'fulfilled') setProfiles(toArray<AnyRecord>(results[0].value).map(p => ({
@@ -56,7 +72,7 @@ function App() {
     })))
     if (results[1].status === 'fulfilled') setSkills(toArray<AnyRecord>(results[1].value).filter(s => s.enabled && value(s, 'activeVersion') != null)
       .map(s => ({ id: s.id, name: s.name, description: s.description, state: 'PUBLISHED', version: String(value(s, 'activeVersion')) })))
-    if (results[2].status === 'fulfilled') setPlugins(toArray<AnyRecord>(results[2].value).filter(p => p.state === 'PUBLISHED')
+    if (results[2].status === 'fulfilled') setPlugins(toArray<AnyRecord>(results[2].value)
       .map(p => ({ id: value(p, 'pluginId'), name: value(p, 'pluginKey'), version: p.version, state: p.state })))
     if (results[3].status === 'fulfilled') setBases(toArray<KnowledgeBase>(results[3].value))
     if (results[4].status === 'fulfilled') setTasks(toArray<AnyRecord>(results[4].value).map(t => ({
@@ -64,7 +80,7 @@ function App() {
     })))
     const failed = results.find(result => result.status === 'rejected')
     if (failed?.status === 'rejected') setNotice(`部分工作区信息暂时无法加载：${failed.reason instanceof Error ? failed.reason.message : '网络错误'}`)
-  }, [request])
+  }, [loadPluginCatalog, request])
 
   useEffect(() => {
     let active = true
