@@ -17,6 +17,7 @@ const fixture = resolve(process.env.HYPERWEAVE_TEST_PDF)
 const expected = process.env.HYPERWEAVE_TEST_EXPECTED || 'ORCHID-739'
 const skillId = process.env.HYPERWEAVE_TEST_SKILL_ID
 const interactive = process.env.HYPERWEAVE_TEST_INTERACTIVE === '1'
+const checkArtifact = interactive || process.env.HYPERWEAVE_TEST_ARTIFACT === '1'
 if (interactive) assert.ok(skillId && credentials.adminEmail && credentials.adminPassword,
   'Interactive acceptance requires an approval-requiring Skill and a separate test administrator')
 const evidence = resolve(process.env.HYPERWEAVE_TEST_EVIDENCE || join(root, '.desktop-next', 'live-evidence'))
@@ -94,9 +95,11 @@ try {
     : `Search knowledge base ${baseId} for the project code name. Return the exact code with its source citation.`
   const interaction = interactive
     ? `I need a cited answer from the selected knowledge base ${baseId}, using the ${skill.name} Skill attached to this role. I will supply the search question in my next reply; ask me for that question using request_user_input before retrieving anything. Follow the platform approval process for the Skill. After retrieving the evidence, provide the answer with its source citation and a downloadable plain text file named desktop-evidence.txt containing the project code.`
-    : prompt
+    : `${prompt}${checkArtifact ? ' Also publish a downloadable plain text file named desktop-evidence.txt containing the retrieved project code. Provide readable content to the publication tool.' : ''}`
   await page.locator('textarea.prompt').fill(interaction)
   await page.getByRole('button', { name: /提交任务/u }).click()
+  assert.equal(await page.locator('.task-detail-head h2').innerText(), interaction,
+    'Task detail must display the original request without runtime role instructions')
   if (interactive) {
     await waitForTaskStatus('等待补充')
     await page.getByPlaceholder('输入补充信息').fill('What is the project code name? Please retrieve the evidence using the bound Skill.')
@@ -117,6 +120,8 @@ try {
     await adminPage.getByRole('button', { name: /任务记录/u }).click()
     await adminPage.locator('.approval-queue .task-list-item').filter({ hasText: id }).click()
     await adminPage.getByRole('button', { name: '批准继续' }).waitFor()
+    await adminPage.locator('.approval-detail pre').filter({ hasText: baseId }).waitFor()
+    assert.equal(await adminPage.locator('.task-detail-head h2').innerText(), interaction)
     assert.equal(await adminPage.getByRole('button', { name: '停止任务' }).count(), 0,
       'Reviewing another user task must not offer owner-only actions')
     await adminPage.screenshot({ path: join(evidence, 'desktop-approval.png'), fullPage: true })
@@ -138,7 +143,7 @@ try {
     try { saved = await readFile(download, 'utf8'); break } catch { await new Promise(r => setTimeout(r, 100)) }
   }
   assert.equal(saved, result)
-  if (interactive) {
+  if (checkArtifact) {
     const artifactPath = join(temp, 'desktop-evidence.txt')
     await app.evaluate(({ dialog }, filePath) => {
       dialog.showSaveDialog = async () => ({ canceled: false, filePath })
@@ -157,7 +162,8 @@ try {
     profileId: profile.id, knowledgeBaseId: baseId, skillId, taskId, result, verifiedAt: new Date().toISOString(),
     checks: ['login', 'profile persistence', 'PDF upload and indexing', 'scoped sandbox task', 'cited result display', 'save result',
       ...(skillId ? ['Skill binding persistence'] : []),
-      ...(interactive ? ['task input', 'separate administrator desktop approval', 'artifact publication and download'] : [])] }, null, 2))
+      ...(interactive ? ['task input', 'separate administrator desktop approval'] : []),
+      ...(checkArtifact ? ['artifact publication and download'] : [])] }, null, 2))
   console.log('Real Electron task execution, cited result display, and result download passed')
 } catch (error) {
   if (app) {

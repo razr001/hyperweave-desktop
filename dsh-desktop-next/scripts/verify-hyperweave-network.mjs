@@ -25,6 +25,7 @@ let sessionRole = 'USER'
 let pendingApprovalRequests = 0
 let approvedTasks = 0
 let reviewState = 'WAITING_APPROVAL'
+let approvalDetailUnavailable = true
 const skillId = '2a000000-0000-4000-8000-000000000001'
 const pluginId = '2a000000-0000-4000-8000-000000000002'
 const knowledgeBaseId = '2a000000-0000-4000-8000-000000000003'
@@ -98,6 +99,11 @@ const platformServer = createServer(async (request, response) => {
     assert.match(String(request.headers['content-type']), /multipart\/form-data; boundary=/u)
     uploadedFiles++
     response.end(JSON.stringify({ code: 0, data: { id: 'version-1', ingestion_state: 'QUEUED' } }))
+  } else if (request.url === '/api/agent/tools/approvals/approval-review') {
+    response.end(JSON.stringify(approvalDetailUnavailable ? { code: 503, message: 'temporarily unavailable' }
+      : { code: 0, data: { approval: { id: 'approval-review', skillId, version: 1, capability: 'knowledge.search',
+        riskLevel: 'HIGH', requiredApprovals: 1, approvalCount: 0 }, requesterUserId: 'another-user',
+        input: { query: 'project code', knowledgeBaseId } } }))
   } else if (request.url === '/api/agent/tasks/pending-approvals') {
     pendingApprovalRequests++
     assert.equal(sessionRole, 'TENANT_ADMIN')
@@ -113,7 +119,7 @@ const platformServer = createServer(async (request, response) => {
   } else if (request.url?.startsWith('/api/agent/tasks/task-review/events') || request.url === '/api/agent/tasks/task-review/artifacts') {
     response.end(JSON.stringify({ code: 0, data: [] }))
   } else if (request.url === '/api/agent/tasks/task-review') {
-    response.end(JSON.stringify({ code: 0, data: { id: 'task-review', state: reviewState, prompt: 'Review selected evidence' } }))
+    response.end(JSON.stringify({ code: 0, data: { id: 'task-review', state: reviewState, prompt: 'Review selected evidence', approvalId: 'approval-review' } }))
   } else if (request.url === '/api/agent/tasks' && request.method === 'GET') {
     response.end(JSON.stringify({ code: 0, data: { items: [], nextCursor: null } }))
   } else if (request.url === '/api/agent/tasks' && request.method === 'POST') {
@@ -272,6 +278,12 @@ try {
   await window.getByRole('button', { name: /任务记录/u }).click()
   await window.locator('.approval-queue .task-list-item').filter({ hasText: 'task-review' }).click()
   await window.getByRole('button', { name: '批准继续' }).waitFor()
+  assert.equal(await window.getByRole('button', { name: '批准继续' }).isDisabled(), true,
+    'approval must remain disabled when its concrete input cannot be loaded')
+  approvalDetailUnavailable = false
+  await window.locator('.approval-queue .task-list-item').filter({ hasText: 'task-review' }).click()
+  await window.locator('.approval-detail pre').filter({ hasText: 'project code' }).waitFor()
+  assert.equal(await window.getByRole('button', { name: '批准继续' }).isEnabled(), true)
   assert.equal(await window.getByRole('button', { name: '停止任务' }).count(), 0)
   await window.getByRole('button', { name: '批准继续' }).click()
   await window.locator('.approval-queue').getByText('暂无待审批任务').waitFor()

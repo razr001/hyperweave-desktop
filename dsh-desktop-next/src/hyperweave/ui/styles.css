@@ -8,3 +8,5 @@
 
 .approval-queue { margin-bottom: 20px; padding: 20px; }
 .approval-queue .section-row { margin-bottom: 12px; }
+
+.approval-detail pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: #101922; border-radius: 8px; }
