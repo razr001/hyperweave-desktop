@@ -12,6 +12,9 @@ const entry = join(root, 'lib', 'hyperweave-main.js')
 const temp = await mkdtemp(join(tmpdir(), 'hyperweave-network-'))
 let blockedOriginRequests = 0
 let authenticatedTaskRequests = 0
+let cancelledTasks = 0
+let recoveredTasks = 0
+let taskState = 'QUEUED'
 let blockedUrl = ''
 
 function listen(server) {
@@ -24,7 +27,7 @@ function listen(server) {
   })
 }
 
-const platformServer = createServer((request, response) => {
+const platformServer = createServer(async (request, response) => {
   if (request.url === '/api/probe') {
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify({ code: 0, data: 'platform-ok' }))
@@ -48,14 +51,27 @@ const platformServer = createServer((request, response) => {
   } else if (request.url === '/api/agent/tasks' && request.method === 'POST') {
     if (request.headers.authorization !== 'Bearer test-access-token') authenticatedTaskRequests = -1
     else authenticatedTaskRequests++
-    response.end(JSON.stringify({ code: 0, data: { id: 'task-1', state: 'QUEUED', prompt: '检查本地工作台连接',
+    const chunks = []
+    for await (const chunk of request) chunks.push(chunk)
+    const taskInput = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    taskState = taskInput.prompt.includes('approval') ? 'WAITING_APPROVAL'
+      : taskInput.prompt.includes('unknown') ? 'OUTCOME_UNKNOWN' : 'QUEUED'
+    response.end(JSON.stringify({ code: 0, data: { id: 'task-1', state: taskState, prompt: taskInput.prompt,
       promptPreview: '检查本地工作台连接', sessionId: 'session-1', requestId: 'request-1' } }))
+  } else if (request.url === '/api/agent/tasks/task-1/cancel' && request.method === 'POST') {
+    cancelledTasks++
+    taskState = 'CANCELLED'
+    response.end(JSON.stringify({ code: 0, data: { id: 'task-1', state: taskState, prompt: '检查本地工作台连接' } }))
+  } else if (request.url === '/api/agent/tasks/task-1/recover' && request.method === 'POST') {
+    recoveredTasks++
+    taskState = 'RUNNING'
+    response.end(JSON.stringify({ code: 0, data: { id: 'task-1', state: taskState, prompt: 'unknown task' } }))
   } else if (request.url?.startsWith('/api/agent/tasks/task-1/events')) {
     response.end(JSON.stringify({ code: 0, data: [] }))
   } else if (request.url === '/api/agent/tasks/task-1/artifacts') {
     response.end(JSON.stringify({ code: 0, data: [] }))
   } else if (request.url === '/api/agent/tasks/task-1') {
-    response.end(JSON.stringify({ code: 0, data: { id: 'task-1', state: 'QUEUED', prompt: '检查本地工作台连接' } }))
+    response.end(JSON.stringify({ code: 0, data: { id: 'task-1', state: taskState, prompt: '检查本地工作台连接' } }))
   } else {
     response.end(JSON.stringify({ code: 0, data: null }))
   }
@@ -101,6 +117,24 @@ try {
   await window.getByRole('button', { name: /提交任务/u }).click()
   await window.getByText('PLATFORM TASK · task-1').waitFor()
   assert.equal(authenticatedTaskRequests, 1, 'task submission should use the authenticated platform session')
+  await window.getByRole('button', { name: '停止任务' }).click()
+  await window.locator('.task-detail-head .status-pill').filter({ hasText: '已取消' }).waitFor()
+  assert.equal(cancelledTasks, 1, 'the workbench should submit task cancellation to HyperWeave')
+
+  await window.getByRole('button', { name: '开始工作' }).click()
+  await window.locator('textarea.prompt').fill('recover unknown task state')
+  await window.getByRole('button', { name: /提交任务/u }).click()
+  await window.getByRole('button', { name: '恢复任务状态' }).waitFor()
+  await window.getByRole('button', { name: '恢复任务状态' }).click()
+  await window.locator('.task-detail-head .status-pill').filter({ hasText: '执行中' }).waitFor()
+  assert.equal(recoveredTasks, 1, 'unknown outcomes should expose the platform recovery operation')
+
+  await window.getByRole('button', { name: '开始工作' }).click()
+  await window.locator('textarea.prompt').fill('approval-gated task')
+  await window.getByRole('button', { name: /提交任务/u }).click()
+  await window.getByText('这项任务需要租户管理员审批').waitFor()
+  assert.equal(await window.getByRole('button', { name: '批准继续' }).count(), 0,
+    'non-admin users must not be offered an approval action')
 
   const sameOrigin = await window.evaluate(async () => await window.hyperweave.request({ path: '/api/probe' }))
   assert.equal(sameOrigin, 'platform-ok', 'same-origin HyperWeave request should reach the platform')

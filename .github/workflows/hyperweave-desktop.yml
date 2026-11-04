@@ -1,0 +1,51 @@
+name: HyperWeave Desktop
+
+on:
+  push:
+    branches: [codex/hyperweave-desktop]
+    paths:
+      - 'dsh-desktop-next/**'
+      - '.github/workflows/hyperweave-desktop.yml'
+      - 'package.json'
+      - 'yarn.lock'
+      - '.yarnrc.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hyperweave-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: HyperWeave Desktop on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.2
+      - run: corepack enable
+      - run: yarn install --immutable
+      - name: Typecheck and focused client tests
+        run: |
+          yarn workspace dsh-desktop-next typecheck
+          yarn workspace dsh-desktop-next test --run tests/hyperweave-client.spec.ts
+      - name: Build and verify HyperWeave package
+        run: |
+          yarn workspace dsh-desktop-next dist:hyperweave
+          yarn workspace dsh-desktop-next verify:hyperweave-package
+      - name: Verify renderer network boundary
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum yarn workspace dsh-desktop-next verify:hyperweave-network
+      - name: Verify renderer network boundary
+        if: runner.os != 'Linux'
+        run: yarn workspace dsh-desktop-next verify:hyperweave-network
