@@ -8,7 +8,7 @@
 
 The earlier Electron wrapper under HyperWeave's `frontend/desktop` has been removed, along with its duplicate Electron build dependencies. The HyperWeave frontend remains the platform web application served from the configured origin; this repository is the single desktop application and packaging path.
 
-The source checkout remains an independent working fork based on the pinned upstream commit. The upstream MIT notice is retained as `LICENSE.upstream` in the source and in the packaged application. Dependency review for the HyperWeave binary is based on the isolated packaging input: the ASAR contains only the bundled HyperWeave main process, preload bridge, local UI, package metadata, and upstream/React notices; Electron and Chromium notices are included beside the app. DSH Host, market, telemetry, and updater dependencies are not copied into that package. Re-run this review when adding runtime dependencies or changing the package file allowlist.
+The source checkout remains an independent working fork based on the pinned upstream commit. The upstream MIT notice is retained as `LICENSE.upstream` in the source and in the packaged application. Dependency review for the HyperWeave binary is based on the isolated packaging input: the ASAR contains only the bundled HyperWeave main process, preload bridge, local UI, package metadata, and upstream/React notices; Electron and Chromium notices are explicitly copied into the application resources beside the ASAR on every platform. DSH Host, market, telemetry, and updater dependencies are not copied into that package. Re-run this review when adding runtime dependencies or changing the package file allowlist.
 
 ## Module decisions
 
@@ -33,7 +33,7 @@ The source checkout remains an independent working fork based on the pinned upst
 
 ## License and packaging check
 
-The HyperWeave app is staged into `.hyperweave-package` rather than packaging the DSH workspace. The build-only `sharp` tool renders the HyperWeave mark into Windows ICO, macOS ICNS, and Linux PNG assets; it is not a runtime dependency of the staged package. `scripts/verify-hyperweave-package.mjs` checks those icon containers, the local UI/preload allowlist, and that upstream, React/Scheduler, Electron, and Chromium license files are included. Other build-only tools such as Electron Builder and `@electron/asar` are absent from the runtime package. This is a focused check of the produced HyperWeave desktop artifact, not a legal audit of every dependency in the upstream DSH development workspace.
+The HyperWeave app is staged into `.hyperweave-package` rather than packaging the DSH workspace. The build-only `sharp` tool renders the HyperWeave mark into Windows ICO, macOS ICNS, and Linux PNG assets; it is not a runtime dependency of the staged package. `scripts/verify-hyperweave-package.mjs` checks those icon containers, the local UI/preload allowlist, and that upstream, React/Scheduler, Electron, and Chromium license files are included. Electron/Chromium notices are explicit `extraResources`; the verifier reads their contents from the ASAR parent directory, including macOS `Contents/Resources`. Other build-only tools such as Electron Builder and `@electron/asar` are absent from the runtime package. This is a focused check of the produced HyperWeave desktop artifact, not a legal audit of every dependency in the upstream DSH development workspace.
 
 ## Verification status
 

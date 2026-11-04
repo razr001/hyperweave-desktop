@@ -15,6 +15,9 @@ files:
 extraMetadata:
   name: hyperweave-desktop
   main: hyperweave-main.js
+extraResources:
+  - LICENSE.electron.txt
+  - LICENSES.chromium.html
 win:
   target: nsis
   icon: hyperweave.ico

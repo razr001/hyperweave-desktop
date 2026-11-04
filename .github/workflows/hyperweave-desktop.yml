@@ -25,7 +25,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        # ARM64 hosted macOS capacity has failed before any job steps could run.
+        os: [windows-latest, ubuntu-latest, macos-26-intel]
     steps:
       - uses: actions/checkout@v6
         with:

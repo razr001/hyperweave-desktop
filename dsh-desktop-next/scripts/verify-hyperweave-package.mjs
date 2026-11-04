@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { extractFile, listPackage } from '@electron/asar'
 
 const output = join('release', 'hyperweave')
@@ -48,6 +48,9 @@ assert.equal(packageInfo.desktopName, 'hyperweave.desktop')
 const ui = extractFile(appAsar, 'ui/index.html').toString('utf8')
 assert.match(ui, /Content-Security-Policy/u)
 assert.match(ui, /connect-src 'none'/u)
-await readFile(appAsar.replace(/resources[\\/]app\.asar$/u, 'LICENSE.electron.txt'))
-await readFile(appAsar.replace(/resources[\\/]app\.asar$/u, 'LICENSES.chromium.html'))
+const resources = dirname(appAsar)
+const electronNotice = await readFile(join(resources, 'LICENSE.electron.txt'), 'utf8')
+const chromiumNotice = await readFile(join(resources, 'LICENSES.chromium.html'), 'utf8')
+assert.match(electronNotice, /Permission is hereby granted/u, 'Electron MIT notice must be shipped')
+assert.match(chromiumNotice, /<html/iu, 'Chromium third-party notices must be shipped as HTML')
 console.log(`Verified isolated HyperWeave Desktop package: ${appAsar}`)

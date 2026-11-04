@@ -1,12 +1,19 @@
 /** Stages a minimal app so electron-builder cannot collect Harness production dependencies. */
 import { copyFile, cp, mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const appDir = join(root, '.hyperweave-package')
 await mkdir(appDir, { recursive: true })
+const require = createRequire(import.meta.url)
+const electronDist = join(dirname(require.resolve('electron')), 'dist')
+// electron-builder removes the top-level Electron notices on macOS.
+// Carry them as explicit resources so every distribution retains both notices.
+await copyFile(join(electronDist, 'LICENSE'), join(appDir, 'LICENSE.electron.txt'))
+await copyFile(join(electronDist, 'LICENSES.chromium.html'), join(appDir, 'LICENSES.chromium.html'))
 await copyFile(join(root, 'lib', 'hyperweave-main.js'), join(appDir, 'hyperweave-main.js'))
 await copyFile(join(root, 'preload.cjs'), join(appDir, 'preload.cjs'))
 await copyFile(join(root, 'LICENSES.third-party.txt'), join(appDir, 'LICENSES.third-party.txt'))
