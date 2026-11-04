@@ -5,3 +5,6 @@
 @media(max-width:1120px){.app-shell{grid-template-columns:215px minmax(0,1fr)}.sidebar{width:215px}.page-content{padding:27px 24px 55px}.agent-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.home-grid{grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr)}}
 .upload-destination{margin:-3px 0 12px}
 .task-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}.text-button.danger{color:#ee8b8b}
+
+.approval-queue { margin-bottom: 20px; padding: 20px; }
+.approval-queue .section-row { margin-bottom: 12px; }

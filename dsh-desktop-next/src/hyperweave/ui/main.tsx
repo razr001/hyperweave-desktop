@@ -1,11 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 
 type AnyRecord = Record<string, any>
 type Profile = { id: string; name: string; roleDescription: string; instructions: string; skillIds: string[]; pluginIds: string[]; enabled: boolean; revision: number }
 type KnowledgeBase = { id: string; name: string; description?: string }
-type Task = { id: string; state: string; prompt?: string; promptPreview?: string; result?: string | null; waitingQuestion?: string | null; approvalId?: string | null; createdAt?: string }
+type Task = { reviewOnly?: boolean; id: string; state: string; prompt?: string; promptPreview?: string; result?: string | null; waitingQuestion?: string | null; approvalId?: string | null; createdAt?: string }
 type Event = { id: number; type: string; message: string; occurredAt: string }
 type Capability = { id: string; name: string; state?: string; version?: string; description?: string }
 
@@ -25,6 +25,8 @@ function App() {
   const [plugins, setPlugins] = useState<Capability[]>([])
   const [bases, setBases] = useState<KnowledgeBase[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
+  const [pendingApprovals, setPendingApprovals] = useState<Task[]>([])
+  const reviewingTask = useRef<string | null>(null)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [events, setEvents] = useState<Event[]>([])
   const [artifacts, setArtifacts] = useState<AnyRecord[]>([])
@@ -62,10 +64,12 @@ function App() {
   }, [request])
 
   const loadWorkspace = useCallback(async () => {
+    const session = await api.session()
     const results = await Promise.allSettled([
       request<AnyRecord[]>('/api/agent/profiles'), request<AnyRecord[]>('/api/skills'),
       loadPluginCatalog(), request<KnowledgeBase[]>('/api/rag/knowledge-bases'),
       request<AnyRecord>('/api/agent/tasks'),
+      value(session, 'role') === 'TENANT_ADMIN' ? request<AnyRecord[]>('/api/agent/tasks/pending-approvals') : Promise.resolve([]),
     ])
     if (results[0].status === 'fulfilled') setProfiles(toArray<AnyRecord>(results[0].value).map(p => ({
       id: p.id, name: p.name, roleDescription: value(p, 'roleDescription') ?? '', instructions: p.instructions,
@@ -78,6 +82,9 @@ function App() {
     if (results[3].status === 'fulfilled') setBases(toArray<KnowledgeBase>(results[3].value))
     if (results[4].status === 'fulfilled') setTasks(toArray<AnyRecord>(results[4].value).map(t => ({
       id: t.id, state: t.state, promptPreview: value(t, 'promptPreview') ?? value(t, 'prompt') ?? '', createdAt: value(t, 'createdAt'),
+    })))
+    if (results[5].status === 'fulfilled') setPendingApprovals(toArray<AnyRecord>(results[5].value).map(t => ({
+      id: t.id, state: t.state, promptPreview: value(t, 'promptPreview') ?? '',
     })))
     const failed = results.find(result => result.status === 'rejected')
     if (failed?.status === 'rejected') setNotice(`部分工作区信息暂时无法加载：${failed.reason instanceof Error ? failed.reason.message : '网络错误'}`)
@@ -101,13 +108,13 @@ function App() {
       request<AnyRecord[]>(`/api/agent/tasks/${encodeURIComponent(id)}/artifacts`).catch(() => []),
     ])
     setSelectedTask({
-      id: task.id, state: task.state, prompt: value(task, 'prompt'), result: task.result,
+      reviewOnly: reviewingTask.current === id, id: task.id, state: task.state, prompt: value(task, 'prompt'), result: task.result,
       waitingQuestion: value(task, 'waitingQuestion'), approvalId: value(task, 'approvalId'),
       createdAt: value(task, 'createdAt'),
     })
     setEvents(toArray<AnyRecord>(eventList).map(e => ({ id: e.id, type: e.type, message: e.message, occurredAt: value(e, 'occurredAt') })))
     setArtifacts(toArray<AnyRecord>(artifactList))
-    setTasks(previous => [{ id: task.id, state: task.state, promptPreview: value(task, 'promptPreview') ?? value(task, 'prompt') ?? '' }, ...previous.filter(t => t.id !== task.id)])
+    if (reviewingTask.current !== id) setTasks(previous => [{ id: task.id, state: task.state, promptPreview: value(task, 'promptPreview') ?? value(task, 'prompt') ?? '' }, ...previous.filter(t => t.id !== task.id)])
   }, [request])
 
   useEffect(() => {
@@ -127,7 +134,13 @@ function App() {
     finally { setBusy(false) }
   }
 
-  async function signOut() { await api.logout(); setUser(null); setProfiles([]); setTasks([]); setSelectedTask(null) }
+  async function signOut() {
+    await api.logout()
+    setUser(null); setPage('home'); setProfiles([]); setTasks([]); setPendingApprovals([]); setSelectedTask(null)
+    setSkills([]); setPlugins([]); setBases([]); setScope([]); setFiles([]); setUploadBaseId(''); setProfileId('')
+    setEvents([]); setArtifacts([]); setAnswer(''); setFollowup(''); setPrompt(''); setDraft(null); setEditing(null); setNotice('')
+    reviewingTask.current = null
+  }
 
   async function submitTask(event: React.FormEvent) {
     event.preventDefault(); if (!prompt.trim()) return
@@ -137,6 +150,7 @@ function App() {
         sessionId: crypto.randomUUID(), requestId: crypto.randomUUID(), prompt: prompt.trim(),
         agentProfileId: profileId || undefined, knowledgeBaseIds: scope,
       })
+      reviewingTask.current = null
       setPrompt(''); setPage('tasks'); await refreshTask(task.id)
     } catch (error) { setNotice(error instanceof Error ? error.message : '提交任务失败') }
     finally { setBusy(false) }
@@ -180,7 +194,8 @@ function App() {
     catch (error) { setNotice(error instanceof Error ? error.message : '下载失败，请重试。') }
   }
 
-  async function openTask(id: string) {
+  async function openTask(id: string, reviewOnly = false) {
+    reviewingTask.current = reviewOnly ? id : null
     setPage('tasks'); setNotice('')
     try { await refreshTask(id) } catch (error) { setNotice(error instanceof Error ? error.message : '读取任务失败') }
   }
@@ -222,6 +237,7 @@ function App() {
       setAnswer(''); setFollowup('')
       if (path === 'followups' && result?.id && result.id !== selectedTask.id) { setPage('tasks'); await refreshTask(result.id) }
       else await refreshTask(selectedTask.id)
+      if (path === 'approval') await loadWorkspace()
     }
     catch (error) { setNotice(error instanceof Error ? error.message : '任务操作失败') }
     finally { setBusy(false) }
@@ -249,7 +265,7 @@ function App() {
 
         {page === 'library' && <><div className="welcome-row"><div><div className="eyebrow">CONTROLLED CATALOG</div><h1>Skills 与插件</h1><p>仅显示 HyperWeave 租户目录中审核发布且当前账号可用的能力。</p></div><span className="connection"><i/> 受控目录</span></div><div className="catalog-grid"><section className="panel"><div className="panel-heading"><span className="heading-icon lilac">✳</span><div><h2>Skills</h2><p>可绑定到你的角色 Agent</p></div></div>{skills.length ? skills.map(skill => <div className="catalog-item" key={skill.id}><span className="catalog-symbol">✳</span><span><b>{skill.name}</b><small>{skill.description || '平台审核通过的 Skill'}</small></span><span className="catalog-version">v{skill.version}</span></div>) : <div className="empty-inline">当前账号没有可安装的已发布 Skill。</div>}</section><section className="panel"><div className="panel-heading"><span className="heading-icon mint">◇</span><div><h2>业务插件</h2><p>在平台隔离工作负载中运行</p></div></div>{plugins.length ? plugins.map(plugin => <div className="catalog-item" key={plugin.id}><span className="catalog-symbol">◇</span><span><b>{plugin.name}</b><small>HyperWeave 受控业务插件</small></span><span className="catalog-version">v{plugin.version}</span></div>) : <div className="empty-inline">当前账号没有可安装的已发布插件。</div>}</section></div><div className="catalog-hint">将能力绑定到 Agent 角色即可使用。授权与撤权由 HyperWeave 平台实时执行。</div></>}
 
-        {page === 'tasks' && <><div className="welcome-row"><div><div className="eyebrow">TASK HISTORY</div><h1>任务记录</h1><p>查看平台沙箱中的执行进度、审批、补充输入和结果。</p></div><button className="button primary" onClick={() => setPage('home')}>＋ 新任务</button></div><div className="tasks-layout"><div className="panel task-list-panel"><div className="list-title">所有任务 <span>{tasks.length}</span></div>{tasks.length ? tasks.map(task => <button key={task.id} className={`task-list-item ${selectedTask?.id === task.id ? 'selected' : ''}`} onClick={() => void openTask(task.id)}><span className="task-state-dot" data-state={task.state}/><span><b>{task.promptPreview || task.prompt || 'Agent 任务'}</b><small>{task.createdAt ? new Date(task.createdAt).toLocaleString('zh-CN') : '最近提交'}</small></span><i className={`status-pill s-${task.state.toLowerCase()}`}>{taskState(task.state)}</i></button>) : <div className="empty-inline">暂无任务</div>}</div><div className="panel task-detail">{selectedTask ? <><div className="task-detail-head"><div><div className="eyebrow">PLATFORM TASK · {selectedTask.id.slice(0, 8)}</div><h2>{selectedTask.prompt || 'Agent 任务'}</h2></div><div className="task-actions"><span className={`status-pill s-${selectedTask.state.toLowerCase()}`}>{taskState(selectedTask.state)}</span>{['QUEUED', 'RUNNING', 'WAITING_INPUT', 'WAITING_APPROVAL'].includes(selectedTask.state) && <button className="text-button danger" disabled={busy} onClick={() => void mutateTask('cancel', {})}>停止任务</button>}{selectedTask.state === 'OUTCOME_UNKNOWN' && <button className="button secondary" disabled={busy} onClick={() => void mutateTask('recover', {})}>{busy ? '正在恢复…' : '恢复任务状态'}</button>}</div></div>{selectedTask.state === 'WAITING_APPROVAL' && <div className="action-card"><b>Agent 正在等待你的审批</b><p>{canApproveTasks ? '平台需要你确认后才会继续执行。' : '这项任务需要租户管理员审批，审批完成后会自动继续。'}</p>{canApproveTasks && <div><button className="button ghost" disabled={busy} onClick={() => void mutateTask('approval', { approve: false })}>拒绝</button><button className="button primary" disabled={busy} onClick={() => void mutateTask('approval', { approve: true })}>批准继续</button></div>}</div>}{selectedTask.state === 'WAITING_INPUT' && <div className="action-card"><b>Agent 需要补充信息</b><p>{selectedTask.waitingQuestion || '请补充完成任务所需的信息。'}</p><textarea value={answer} onChange={e => setAnswer(e.target.value)} placeholder="输入补充信息"/><button className="button primary" disabled={busy || !answer.trim()} onClick={() => void mutateTask('input', { responseId: crypto.randomUUID(), response: answer.trim() })}>提交补充信息</button></div>}<div className="timeline"><h3>执行阶段</h3>{events.length ? events.map(event => <div className="timeline-item" key={event.id}><span className="timeline-dot"/><div><b>{event.message}</b><small>{new Date(event.occurredAt).toLocaleString('zh-CN')}</small></div></div>) : <div className="empty-inline">任务事件会在平台执行过程中显示。</div>}</div>{selectedTask.result && <div className="result-block"><h3>任务结果</h3><pre>{selectedTask.result}</pre><button className="text-button" onClick={() => void downloadFile(`/api/agent/tasks/${selectedTask.id}/result`, `hyperweave-task-${selectedTask.id}.txt`)}>保存结果 ↓</button></div>}{artifacts.length > 0 && <div className="artifact-block"><h3>产物</h3>{artifacts.map(artifact => <div key={artifact.id}><span>▤</span><span>{value(artifact, 'fileName')}<small>{Math.ceil((value(artifact, 'size') ?? 0) / 1024)} KB</small></span><button className="text-button" onClick={() => void downloadFile(`/api/agent/tasks/${selectedTask.id}/artifacts/${artifact.id}/download`, value(artifact, 'fileName'))}>下载 ↓</button></div>)}</div>}{selectedTask.state === 'SUCCEEDED' && <div className="followup"><h3>继续这项工作</h3><textarea value={followup} onChange={e => setFollowup(e.target.value)} placeholder="补充问题，创建一项关联的后续任务"/><button className="button secondary" disabled={busy || !followup.trim()} onClick={() => void mutateTask('followups', { requestId: crypto.randomUUID(), prompt: followup.trim() })}>创建后续任务 ↗</button></div>}</> : <div className="empty-state"><span>◷</span><h2>选择一项任务</h2><p>从左侧列表查看执行进度和结果。</p></div>}</div></div></>}
+        {page === 'tasks' && <><div className="welcome-row"><div><div className="eyebrow">TASK HISTORY</div><h1>任务记录</h1><p>查看平台沙箱中的执行进度、审批、补充输入和结果。</p></div><button className="button primary" onClick={() => setPage('home')}>＋ 新任务</button></div>{canApproveTasks && <section className="panel approval-queue"><div className="section-row"><h2>待我审批</h2><button className="text-button" onClick={() => void loadWorkspace().catch(error => setNotice(error instanceof Error ? error.message : '刷新失败'))}>刷新待审批任务</button></div>{pendingApprovals.length ? pendingApprovals.map(task => <button className="task-list-item" key={task.id} onClick={() => void openTask(task.id, true)}><span className="task-state-dot" data-state="WAITING_APPROVAL"/><span><b>{task.promptPreview || 'Agent 任务'}</b><small>{task.id}</small></span><i className="status-pill">查看审批</i></button>) : <p className="empty-inline">暂无待审批任务</p>}</section>}<div className="tasks-layout"><div className="panel task-list-panel"><div className="list-title">所有任务 <span>{tasks.length}</span></div>{tasks.length ? tasks.map(task => <button key={task.id} className={`task-list-item ${selectedTask?.id === task.id ? 'selected' : ''}`} onClick={() => void openTask(task.id)}><span className="task-state-dot" data-state={task.state}/><span><b>{task.promptPreview || task.prompt || 'Agent 任务'}</b><small>{task.createdAt ? new Date(task.createdAt).toLocaleString('zh-CN') : '最近提交'}</small></span><i className={`status-pill s-${task.state.toLowerCase()}`}>{taskState(task.state)}</i></button>) : <div className="empty-inline">暂无任务</div>}</div><div className="panel task-detail">{selectedTask ? <><div className="task-detail-head"><div><div className="eyebrow">PLATFORM TASK · {selectedTask.id.slice(0, 8)}</div><h2>{selectedTask.prompt || 'Agent 任务'}</h2></div><div className="task-actions"><span className={`status-pill s-${selectedTask.state.toLowerCase()}`}>{taskState(selectedTask.state)}</span>{!selectedTask.reviewOnly && ['QUEUED', 'RUNNING', 'WAITING_INPUT', 'WAITING_APPROVAL'].includes(selectedTask.state) && <button className="text-button danger" disabled={busy} onClick={() => void mutateTask('cancel', {})}>停止任务</button>}{!selectedTask.reviewOnly && selectedTask.state === 'OUTCOME_UNKNOWN' && <button className="button secondary" disabled={busy} onClick={() => void mutateTask('recover', {})}>{busy ? '正在恢复…' : '恢复任务状态'}</button>}</div></div>{selectedTask.state === 'WAITING_APPROVAL' && <div className="action-card"><b>Agent 正在等待你的审批</b><p>{canApproveTasks ? '平台需要你确认后才会继续执行。' : '这项任务需要租户管理员审批，审批完成后会自动继续。'}</p>{canApproveTasks && <div><button className="button ghost" disabled={busy} onClick={() => void mutateTask('approval', { approve: false })}>拒绝</button><button className="button primary" disabled={busy} onClick={() => void mutateTask('approval', { approve: true })}>批准继续</button></div>}</div>}{!selectedTask.reviewOnly && selectedTask.state === 'WAITING_INPUT' && <div className="action-card"><b>Agent 需要补充信息</b><p>{selectedTask.waitingQuestion || '请补充完成任务所需的信息。'}</p><textarea value={answer} onChange={e => setAnswer(e.target.value)} placeholder="输入补充信息"/><button className="button primary" disabled={busy || !answer.trim()} onClick={() => void mutateTask('input', { responseId: crypto.randomUUID(), response: answer.trim() })}>提交补充信息</button></div>}<div className="timeline"><h3>执行阶段</h3>{events.length ? events.map(event => <div className="timeline-item" key={event.id}><span className="timeline-dot"/><div><b>{event.message}</b><small>{new Date(event.occurredAt).toLocaleString('zh-CN')}</small></div></div>) : <div className="empty-inline">任务事件会在平台执行过程中显示。</div>}</div>{selectedTask.result && <div className="result-block"><h3>任务结果</h3><pre>{selectedTask.result}</pre><button className="text-button" onClick={() => void downloadFile(`/api/agent/tasks/${selectedTask.id}/result`, `hyperweave-task-${selectedTask.id}.txt`)}>保存结果 ↓</button></div>}{artifacts.length > 0 && <div className="artifact-block"><h3>产物</h3>{artifacts.map(artifact => <div key={artifact.id}><span>▤</span><span>{value(artifact, 'fileName')}<small>{Math.ceil((value(artifact, 'size') ?? 0) / 1024)} KB</small></span><button className="text-button" onClick={() => void downloadFile(`/api/agent/tasks/${selectedTask.id}/artifacts/${artifact.id}/download`, value(artifact, 'fileName'))}>下载 ↓</button></div>)}</div>}{!selectedTask.reviewOnly && selectedTask.state === 'SUCCEEDED' && <div className="followup"><h3>继续这项工作</h3><textarea value={followup} onChange={e => setFollowup(e.target.value)} placeholder="补充问题，创建一项关联的后续任务"/><button className="button secondary" disabled={busy || !followup.trim()} onClick={() => void mutateTask('followups', { requestId: crypto.randomUUID(), prompt: followup.trim() })}>创建后续任务 ↗</button></div>}</> : <div className="empty-state"><span>◷</span><h2>选择一项任务</h2><p>从左侧列表查看执行进度和结果。</p></div>}</div></div></>}
       </section>
     </main>
   </div>

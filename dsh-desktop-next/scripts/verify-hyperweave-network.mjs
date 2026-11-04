@@ -21,6 +21,10 @@ let knowledgeBases = []
 let submittedTaskInput
 let taskState = 'QUEUED'
 let blockedUrl = ''
+let sessionRole = 'USER'
+let pendingApprovalRequests = 0
+let approvedTasks = 0
+let reviewState = 'WAITING_APPROVAL'
 const skillId = '2a000000-0000-4000-8000-000000000001'
 const pluginId = '2a000000-0000-4000-8000-000000000002'
 const knowledgeBaseId = '2a000000-0000-4000-8000-000000000003'
@@ -55,9 +59,9 @@ const platformServer = createServer(async (request, response) => {
   response.writeHead(200, { 'Content-Type': 'application/json' })
   if (request.url === '/api/tenant/auth/login' && request.method === 'POST') {
     response.end(JSON.stringify({ code: 0, data: { access_token: 'test-access-token', refresh_token: 'test-refresh-token',
-      user: { id: 'user-1', email: 'agent@example.test', display_name: '测试用户', role: 'USER' } } }))
+      user: { id: 'user-1', email: 'agent@example.test', display_name: '测试用户', role: sessionRole } } }))
   } else if (request.url === '/api/tenant/auth/me') {
-    response.end(JSON.stringify({ code: 0, data: { id: 'user-1', email: 'agent@example.test', display_name: '测试用户', role: 'USER' } }))
+    response.end(JSON.stringify({ code: 0, data: { id: 'user-1', email: 'agent@example.test', display_name: '测试用户', role: sessionRole } }))
   } else if (request.url?.startsWith('/api/agent/plugins/catalog')) {
     if (request.headers.authorization !== 'Bearer test-access-token') authenticatedPluginCatalogRequests = -1
     else authenticatedPluginCatalogRequests++
@@ -94,6 +98,22 @@ const platformServer = createServer(async (request, response) => {
     assert.match(String(request.headers['content-type']), /multipart\/form-data; boundary=/u)
     uploadedFiles++
     response.end(JSON.stringify({ code: 0, data: { id: 'version-1', ingestion_state: 'QUEUED' } }))
+  } else if (request.url === '/api/agent/tasks/pending-approvals') {
+    pendingApprovalRequests++
+    assert.equal(sessionRole, 'TENANT_ADMIN')
+    response.end(JSON.stringify({ code: 0, data: reviewState === 'WAITING_APPROVAL'
+      ? [{ id: 'task-review', state: reviewState, promptPreview: 'Review selected evidence' }] : [] }))
+  } else if (request.url === '/api/agent/tasks/task-review/approval' && request.method === 'POST') {
+    const chunks = []
+    for await (const chunk of request) chunks.push(chunk)
+    assert.equal(JSON.parse(Buffer.concat(chunks).toString('utf8')).approve, true)
+    approvedTasks++
+    reviewState = 'RUNNING'
+    response.end(JSON.stringify({ code: 0, data: { id: 'task-review', state: reviewState } }))
+  } else if (request.url?.startsWith('/api/agent/tasks/task-review/events') || request.url === '/api/agent/tasks/task-review/artifacts') {
+    response.end(JSON.stringify({ code: 0, data: [] }))
+  } else if (request.url === '/api/agent/tasks/task-review') {
+    response.end(JSON.stringify({ code: 0, data: { id: 'task-review', state: reviewState, prompt: 'Review selected evidence' } }))
   } else if (request.url === '/api/agent/tasks' && request.method === 'GET') {
     response.end(JSON.stringify({ code: 0, data: { items: [], nextCursor: null } }))
   } else if (request.url === '/api/agent/tasks' && request.method === 'POST') {
@@ -154,6 +174,7 @@ try {
     timeout: 30_000,
   })
   const window = await app.firstWindow()
+  window.setDefaultTimeout(30_000)
   await window.waitForLoadState('domcontentloaded')
   assert.equal(new URL(window.url()).protocol, 'file:', 'the client should render its own packaged workbench')
   assert.equal(await window.title(), 'HyperWeave')
@@ -241,6 +262,23 @@ try {
   const sameOrigin = await window.evaluate(async () => await window.hyperweave.request({ path: '/api/probe' }))
   assert.equal(sameOrigin, 'platform-ok', 'same-origin HyperWeave request should reach the platform')
 
+  assert.equal(pendingApprovalRequests, 0, 'ordinary users must not request the administrator queue')
+  await window.getByRole('button', { name: /退出登录/u }).click()
+  sessionRole = 'TENANT_ADMIN'
+  await window.locator('input[type="email"]').fill('admin@example.test')
+  await window.locator('input[type="password"]').fill('test-password')
+  await window.getByRole('button', { name: /登录 HyperWeave/u }).click()
+  await window.getByRole('heading', { name: '今天想完成什么？' }).waitFor()
+  await window.getByRole('button', { name: /任务记录/u }).click()
+  await window.locator('.approval-queue .task-list-item').filter({ hasText: 'task-review' }).click()
+  await window.getByRole('button', { name: '批准继续' }).waitFor()
+  assert.equal(await window.getByRole('button', { name: '停止任务' }).count(), 0)
+  await window.getByRole('button', { name: '批准继续' }).click()
+  await window.locator('.approval-queue').getByText('暂无待审批任务').waitFor()
+  assert.equal(approvedTasks, 1, 'an administrator can approve another user task from the queue')
+  assert.equal(await window.locator('.task-list-panel').getByText('Review selected evidence').count(), 0,
+    'reviewing another user task must not add it to the administrator own task history')
+
   const externalFetch = await window.evaluate(async (url) => {
     try { return await (await fetch(url)).text() }
     catch { return 'blocked' }
@@ -269,7 +307,6 @@ try {
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), pageCount,
     'external popup should not create a BrowserWindow')
   assert.equal(blockedOriginRequests, 0, 'navigation and popup attempts must not reach the other origin')
-
   console.log('Verified Electron HyperWeave network boundary: same-origin allowed; external request, navigation, and popup denied.')
 } finally {
   if (app) await app.close()
