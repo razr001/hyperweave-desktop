@@ -22,8 +22,11 @@ env:
   # What the packaging cache holds depends on the product version the prepared runtime records and
   # on the Electron, electron-builder and pnpm releases it downloads or embeds, not on the lockfile.
   PACKAGING_CACHE_INPUTS: >-
-    const m = require('./dsh-plugin-desktop-beta/package.json');
-    [m.version, 'electron' + m.devDependencies.electron, 'builder' + m.devDependencies['electron-builder'], 'pnpm' + m.dependencies.pnpm].join('-')
+    const beta = require('./dsh-plugin-desktop-beta/package.json');
+    const next = require('./dsh-desktop-next/package.json');
+    [beta.version, 'electron' + beta.devDependencies.electron, 'builder' + beta.devDependencies['electron-builder'],
+    'pnpm' + beta.dependencies.pnpm, 'next-electron' + next.devDependencies.electron,
+    'next-builder' + next.devDependencies['electron-builder'], 'hyperweave-nsis-1.2.1'].join('-')
 
 # Pull requests only restore caches; pushes and manual runs save them. Pull requests therefore never
 # upload duplicates of master's entries or evict them from the repository's cache budget.
@@ -224,6 +227,10 @@ jobs:
           DSH_WINDOWS_PACKAGE_COMPRESSION: store
           DSH_WINDOWS_REUSE_UNPACKED: '1'
         run: yarn workspace dsh-plugin-desktop-beta dist:win-portable
+      - name: Build and verify HyperWeave Windows installer
+        run: |
+          yarn workspace dsh-desktop-next dist:hyperweave
+          yarn workspace dsh-desktop-next verify:hyperweave-package
       - name: Save primary runtime and Electron Builder downloads
         if: github.event_name != 'pull_request' && steps.packaging-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
@@ -295,6 +302,12 @@ jobs:
           # requests build the AppImage alone. Pushes to master and manual runs build both.
           DSH_LINUX_PACKAGE_TARGETS: ${{ github.event_name == 'pull_request' && 'AppImage' || 'AppImage,deb' }}
         run: yarn workspace dsh-plugin-desktop-beta dist:linux
+      - name: Build and verify HyperWeave Linux AppImage
+        run: |
+          yarn workspace dsh-desktop-next dist:hyperweave
+          yarn workspace dsh-desktop-next verify:hyperweave-package
+      - name: Verify HyperWeave renderer network boundary
+        run: xvfb-run --auto-servernum yarn workspace dsh-desktop-next verify:hyperweave-network
       - name: Save primary runtime and Electron Builder downloads
         if: github.event_name != 'pull_request' && steps.packaging-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
@@ -378,6 +391,10 @@ jobs:
           # build and mount cost about 45 s. Pushes to master and manual runs build and mount it.
           DSH_MAC_SMOKE_TARGET: ${{ github.event_name == 'pull_request' && 'dir' || 'dmg' }}
         run: yarn workspace dsh-plugin-desktop-beta dist:mac-smoke
+      - name: Build and verify HyperWeave macOS DMG
+        run: |
+          yarn workspace dsh-desktop-next dist:hyperweave
+          yarn workspace dsh-desktop-next verify:hyperweave-package
       - name: Save primary runtime and Electron Builder downloads
         if: github.event_name != 'pull_request' && steps.packaging-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6

@@ -22305,6 +22305,7 @@ __metadata:
     react-dom: "npm:18.3.1"
     selfsigned: "npm:5.5.0"
     shadcn: "npm:^4.18.0"
+    sharp: "npm:0.35.5"
     shiki: "npm:^4.3.1"
     simple-icons: "npm:16.31.0"
     sonner: "npm:^2.0.8"

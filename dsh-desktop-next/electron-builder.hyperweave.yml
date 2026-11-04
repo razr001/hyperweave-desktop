@@ -1,0 +1,38 @@
+appId: io.hyperweave.desktop
+productName: HyperWeave
+electronVersion: 44.7.0
+toolsets:
+  nsis: 1.2.1
+directories:
+  output: ../release/hyperweave
+files:
+  - hyperweave-main.js
+  - package.json
+  - LICENSE.upstream
+extraMetadata:
+  name: hyperweave-desktop
+  main: hyperweave-main.js
+win:
+  target: nsis
+  icon: hyperweave.ico
+  artifactName: HyperWeave-${version}-${arch}-Setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: hyperweave.ico
+  uninstallerIcon: hyperweave.ico
+mac:
+  target: dmg
+  icon: hyperweave.icns
+  artifactName: HyperWeave-${version}-${arch}.${ext}
+dmg:
+  icon: hyperweave.icns
+linux:
+  target: AppImage
+  icon: hyperweave.png
+  executableName: hyperweave
+  syncDesktopName: true
+  category: Office
+  artifactName: HyperWeave-${version}-${arch}.${ext}
+npmRebuild: false
