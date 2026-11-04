@@ -37,15 +37,15 @@ jobs:
       - run: yarn install --immutable
       - name: Typecheck and focused client tests
         run: |
-          yarn workspace dsh-desktop-next typecheck
-          yarn workspace dsh-desktop-next test --run tests/hyperweave-client.spec.ts
+          yarn typecheck
+          yarn test
       - name: Build and verify HyperWeave package
         run: |
-          yarn workspace dsh-desktop-next dist:hyperweave
-          yarn workspace dsh-desktop-next verify:hyperweave-package
+          yarn dist
+          yarn verify:package
       - name: Verify renderer network boundary
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum yarn workspace dsh-desktop-next verify:hyperweave-network
+        run: xvfb-run --auto-servernum yarn verify:desktop
       - name: Verify renderer network boundary
         if: runner.os != 'Linux'
-        run: yarn workspace dsh-desktop-next verify:hyperweave-network
+        run: yarn verify:desktop

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const entry = join(root, 'lib', 'hyperweave-main.js')
-if (!existsSync(entry)) throw new Error('Build the desktop first: yarn workspace dsh-desktop-next build')
+if (!existsSync(entry)) throw new Error('Build the desktop first: yarn build')
 if (!existsSync(join(root, 'dist', 'hyperweave-ui', 'index.html')))
   throw new Error('Build the HyperWeave workbench first: yarn workspace dsh-desktop-next build:hyperweave-ui')
 const require = createRequire(join(root, 'package.json'))

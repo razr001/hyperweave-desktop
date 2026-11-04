@@ -1,4 +1,10 @@
-# DSH Desktop repository rules
+# HyperWeave fork rules
+
+This fork delivers the HyperWeave-only desktop client. Root `dev`, `start`, `build`, `check`, `test`, `typecheck`, `dist` and platform packaging aliases target HyperWeave. They must not prepare DSH markets, Agents Anywhere, or a Harness runtime. Use `yarn verify:desktop` for the explicit graphical Electron smoke and `yarn verify:package` after packaging.
+
+The original default commands are retained under `dsh:*` for deliberate upstream maintenance. The upstream notes below describe that historical product, not the HyperWeave release workflow. HyperWeave-only changes need no Stable/Beta mirroring or upstream submodule build. Business plugins are deferred by the user; do not make Kata deployment a desktop delivery gate.
+
+# Upstream DSH Desktop repository rules (reference)
 
 This repository owns the desktop product around an unmodified DeepSeek Harness checkout.
 
