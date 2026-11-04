@@ -15,8 +15,15 @@ let authenticatedTaskRequests = 0
 let authenticatedPluginCatalogRequests = 0
 let cancelledTasks = 0
 let recoveredTasks = 0
+let uploadedFiles = 0
+let savedProfiles = []
+let knowledgeBases = []
+let submittedTaskInput
 let taskState = 'QUEUED'
 let blockedUrl = ''
+const skillId = '2a000000-0000-4000-8000-000000000001'
+const pluginId = '2a000000-0000-4000-8000-000000000002'
+const knowledgeBaseId = '2a000000-0000-4000-8000-000000000003'
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -48,9 +55,39 @@ const platformServer = createServer(async (request, response) => {
   } else if (request.url?.startsWith('/api/agent/plugins/catalog')) {
     if (request.headers.authorization !== 'Bearer test-access-token') authenticatedPluginCatalogRequests = -1
     else authenticatedPluginCatalogRequests++
-    response.end(JSON.stringify({ code: 0, data: { plugins: [], nextPluginKey: null } }))
-  } else if (['/api/agent/profiles', '/api/skills', '/api/agent/plugins', '/api/rag/knowledge-bases'].includes(request.url ?? '')) {
-    response.end(JSON.stringify({ code: 0, data: [] }))
+    response.end(JSON.stringify({ code: 0, data: { plugins: [{ pluginId, pluginKey: 'ledger-export', versionId: '2a000000-0000-4000-8000-000000000004', version: '1.0.0', description: 'Ledger export' }], nextPluginKey: null } }))
+  } else if (request.url === '/api/agent/profiles' && request.method === 'GET') {
+    response.end(JSON.stringify({ code: 0, data: savedProfiles }))
+  } else if (request.url === '/api/agent/profiles' && request.method === 'POST') {
+    const chunks = []
+    for await (const chunk of request) chunks.push(chunk)
+    const input = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    const profile = { id: '2a000000-0000-4000-8000-000000000005', name: input.name,
+      roleDescription: input.role_description, instructions: input.instructions, enabled: true, revision: 1,
+      skillIds: input.skill_ids, pluginIds: input.plugin_ids, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+    savedProfiles = [profile]
+    response.end(JSON.stringify({ code: 0, data: profile }))
+  } else if (request.url === '/api/skills') {
+    response.end(JSON.stringify({ code: 0, data: [{ id: skillId, name: 'Research Notes', description: 'Summarize uploaded notes', enabled: true, activeVersion: 1 }] }))
+  } else if (request.url === '/api/rag/knowledge-bases' && request.method === 'GET') {
+    response.end(JSON.stringify({ code: 0, data: knowledgeBases }))
+  } else if (request.url === '/api/rag/knowledge-bases' && request.method === 'POST') {
+    const chunks = []
+    for await (const chunk of request) chunks.push(chunk)
+    const input = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    const base = { id: knowledgeBaseId, name: input.name, description: input.description }
+    knowledgeBases = [base]
+    response.end(JSON.stringify({ code: 0, data: base }))
+  } else if (request.url === `/api/rag/knowledge-bases/${knowledgeBaseId}/documents` && request.method === 'POST') {
+    response.end(JSON.stringify({ code: 0, data: { id: '2a000000-0000-4000-8000-000000000006', knowledge_base_id: knowledgeBaseId, source_name: 'notes.txt' } }))
+  } else if (request.url?.startsWith(`/api/rag/knowledge-bases/${knowledgeBaseId}/documents/`) && request.url.endsWith('/versions') && request.method === 'POST') {
+    const chunks = []
+    for await (const chunk of request) chunks.push(chunk)
+    const uploaded = Buffer.concat(chunks).toString('utf8')
+    assert.match(uploaded, /name="notes\.txt"/u, 'selected local file should be sent as a named multipart upload')
+    assert.match(String(request.headers['content-type']), /multipart\/form-data; boundary=/u)
+    uploadedFiles++
+    response.end(JSON.stringify({ code: 0, data: { id: 'version-1', ingestion_state: 'QUEUED' } }))
   } else if (request.url === '/api/agent/tasks' && request.method === 'GET') {
     response.end(JSON.stringify({ code: 0, data: { items: [], nextCursor: null } }))
   } else if (request.url === '/api/agent/tasks' && request.method === 'POST') {
@@ -59,6 +96,7 @@ const platformServer = createServer(async (request, response) => {
     const chunks = []
     for await (const chunk of request) chunks.push(chunk)
     const taskInput = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    submittedTaskInput = taskInput
     taskState = taskInput.prompt.includes('approval') ? 'WAITING_APPROVAL'
       : taskInput.prompt.includes('unknown') ? 'OUTCOME_UNKNOWN' : 'QUEUED'
     response.end(JSON.stringify({ code: 0, data: { id: 'task-1', state: taskState, prompt: taskInput.prompt,
@@ -119,10 +157,34 @@ try {
   await window.getByRole('heading', { name: '今天想完成什么？' }).waitFor()
   assert.equal(authenticatedPluginCatalogRequests, 1, 'the workbench should load the authenticated platform plugin catalog')
 
+  await window.getByRole('button', { name: /Skills 与插件/u }).click()
+  await window.getByText('ledger-export', { exact: true }).waitFor()
+  await window.getByRole('button', { name: /我的 Agent/u }).click()
+  await window.getByRole('button', { name: /新建角色/u }).click()
+  await window.getByLabel('角色名称').fill('Evidence Researcher')
+  await window.getByLabel('角色简介').fill('Research and cite internal sources')
+  await window.getByLabel('工作方式与指令').fill('Use approved skills and cite every source.')
+  await window.locator('.binding-group').nth(0).getByRole('checkbox').check()
+  await window.locator('.binding-group').nth(1).getByRole('checkbox').check()
+  await window.getByRole('button', { name: '保存角色' }).click()
+  await window.getByText('Evidence Researcher', { exact: true }).waitFor()
+  assert.equal(savedProfiles.length, 1, 'the profile should persist through the platform profile API')
+  assert.deepEqual(savedProfiles[0].skillIds, [skillId])
+  assert.deepEqual(savedProfiles[0].pluginIds, [pluginId])
+
+  await window.getByRole('button', { name: /开始工作/u }).click()
+  await window.locator('.task-composer select').selectOption(savedProfiles[0].id)
+  await window.locator('input[type="file"]').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('private local notes') })
+  await window.getByRole('button', { name: /安全上传/u }).click()
+  await window.getByText('已将 1 个文件提交到平台知识库').waitFor()
+  assert.equal(uploadedFiles, 1, 'the selected local file should upload to the authorized HyperWeave knowledge base')
+
   await window.locator('textarea.prompt').fill('检查本地工作台连接')
   await window.getByRole('button', { name: /提交任务/u }).click()
   await window.getByText('PLATFORM TASK · task-1').waitFor()
   assert.equal(authenticatedTaskRequests, 1, 'task submission should use the authenticated platform session')
+  assert.equal(submittedTaskInput.agentProfileId, savedProfiles[0].id, 'task submissions should include the selected role profile')
+  assert.deepEqual(submittedTaskInput.knowledgeBaseIds, [knowledgeBaseId], 'task submissions should include the selected knowledge scope')
   await window.getByRole('button', { name: '停止任务' }).click()
   await window.locator('.task-detail-head .status-pill').filter({ hasText: '已取消' }).waitFor()
   assert.equal(cancelledTasks, 1, 'the workbench should submit task cancellation to HyperWeave')
