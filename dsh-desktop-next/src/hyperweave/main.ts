@@ -204,8 +204,8 @@ function registerPlatformIpc(): void {
     return agentProvider.submit(input)
   })
   ipcMain.handle('hyperweave:upload', async (_event, input: UploadInput) => {
-    if (!(input?.bytes instanceof Uint8Array) || typeof input.name !== 'string' || input.bytes.length > 268_435_456) {
-      throw new TypeError('资料文件无效或超过 256 MB 限制')
+    if (!(input?.bytes instanceof Uint8Array) || typeof input.name !== 'string' || input.bytes.length > 104_857_600) {
+      throw new TypeError('资料文件无效或超过 100 MB 限制')
     }
     const form = new FormData()
     const fileBytes = input.bytes.buffer.slice(input.bytes.byteOffset, input.bytes.byteOffset + input.bytes.byteLength) as ArrayBuffer
