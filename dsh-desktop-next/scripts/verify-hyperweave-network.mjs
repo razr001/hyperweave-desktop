@@ -28,6 +28,12 @@ let reviewState = 'WAITING_APPROVAL'
 let approvalDetailUnavailable = true
 let skillAvailable = true
 let taskEventsUnavailable = false
+let requiredAccessToken = null
+let refreshRequests = 0
+let refreshFailure = 0
+let holdRefresh = false
+let refreshStarted
+let releaseRefresh
 const skillId = '2a000000-0000-4000-8000-000000000001'
 const pluginId = '2a000000-0000-4000-8000-000000000002'
 const knowledgeBaseId = '2a000000-0000-4000-8000-000000000003'
@@ -43,6 +49,20 @@ function listen(server) {
 }
 
 const platformServer = createServer(async (request, response) => {
+  if (request.url === '/api/tenant/auth/refresh') {
+    refreshRequests++
+    if (holdRefresh) await new Promise(resolve => { releaseRefresh = resolve; refreshStarted?.() })
+    response.writeHead(refreshFailure || 200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(refreshFailure ? { code: refreshFailure, message: 'refresh refused' }
+      : { code: 0, data: { access_token: requiredAccessToken, refresh_token: 'refreshed-session' } }))
+    return
+  }
+  if (requiredAccessToken && request.url !== '/api/tenant/auth/login'
+    && request.headers.authorization !== `Bearer ${requiredAccessToken}`) {
+    response.writeHead(401, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify({ code: 401, message: 'access expired' }))
+    return
+  }
   if (request.url === '/api/probe') {
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify({ code: 0, data: 'platform-ok' }))
@@ -344,6 +364,69 @@ try {
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), pageCount,
     'external popup should not create a BrowserWindow')
   assert.equal(blockedOriginRequests, 0, 'navigation and popup attempts must not reach the other origin')
+
+  requiredAccessToken = 'refreshed-access-token'
+  holdRefresh = true
+  const started = new Promise(resolve => { refreshStarted = resolve })
+  const refreshed = window.evaluate(async () => Promise.all([
+    window.hyperweave.request({ path: '/api/probe' }),
+    window.hyperweave.request({ path: '/api/probe' }),
+    window.hyperweave.download({ path: '/api/agent/tasks/task-1/result', fileName: 'result.txt' }),
+  ]))
+  await started
+  releaseRefresh()
+  assert.deepEqual(await refreshed, ['platform-ok', 'platform-ok', true])
+  assert.equal(refreshRequests, 1, 'concurrent API and artifact requests share one session refresh')
+  holdRefresh = false
+  requiredAccessToken = 'next-access-token'
+  refreshFailure = 503
+  assert.equal(await window.evaluate(async () => {
+    try { await window.hyperweave.request({ path: '/api/probe' }); return 'allowed' } catch { return 'failed' }
+  }), 'failed')
+  refreshFailure = 0
+  assert.equal(await window.evaluate(() => window.hyperweave.request({ path: '/api/probe' })), 'platform-ok',
+    'temporary refresh failure retains the session for a later attempt')
+
+  requiredAccessToken = 'expired-access-token'
+  refreshFailure = 401
+  await window.evaluate(async () => {
+    try { await window.hyperweave.request({ path: '/api/probe' }) } catch { /* expected expiration */ }
+  })
+  assert.equal(await window.evaluate(() => window.hyperweave.session()), null, 'invalid refresh clears the session')
+
+  refreshFailure = 0
+  await window.evaluate(() => window.hyperweave.login({ email: 'agent@example.test', password: 'test-password' }))
+  holdRefresh = true
+  const logoutStarted = new Promise(resolve => { refreshStarted = resolve })
+  const beforeLogout = window.evaluate(async () => {
+    try { await window.hyperweave.request({ path: '/api/probe' }); return 'allowed' } catch { return 'expired' }
+  })
+  await logoutStarted
+  await window.evaluate(() => window.hyperweave.logout())
+  releaseRefresh()
+  assert.equal(await beforeLogout, 'expired')
+  assert.equal(await window.evaluate(() => window.hyperweave.session()), null, 'late refresh cannot restore a logged-out session')
+  holdRefresh = false
+  requiredAccessToken = 'test-access-token'
+  await window.evaluate(() => window.hyperweave.login({ email: 'agent@example.test', password: 'test-password' }))
+  const encryptedStorage = await app.evaluate(({ safeStorage }) => safeStorage.isEncryptionAvailable())
+  await app.close()
+  app = await electron.launch({ executablePath: electronExecutable,
+    args: [...(packagedExecutable ? [] : [entry]), ...(process.platform === 'linux' ? ['--no-sandbox'] : []), `--user-data-dir=${join(temp, 'user-data')}`],
+    env: launchEnv, timeout: 30_000 })
+  const restoredWindow = await app.firstWindow()
+  if (encryptedStorage) {
+    await restoredWindow.getByRole('heading', { name: '今天想完成什么？' }).waitFor()
+    assert.ok(await restoredWindow.evaluate(() => window.hyperweave.session()), 'same-platform encrypted session restores after restart')
+  } else await restoredWindow.locator('.login-form').waitFor()
+  await app.close()
+  app = await electron.launch({ executablePath: electronExecutable,
+    args: [...(packagedExecutable ? [] : [entry]), ...(process.platform === 'linux' ? ['--no-sandbox'] : []), `--user-data-dir=${join(temp, 'user-data')}`],
+    env: { ...launchEnv, HYPERWEAVE_PLATFORM_URL: `http://127.0.0.1:${blockedPort}` }, timeout: 30_000 })
+  const changedPlatformWindow = await app.firstWindow()
+  await changedPlatformWindow.locator('.login-form').waitFor()
+  assert.equal(await changedPlatformWindow.evaluate(() => window.hyperweave.session()), null)
+  assert.equal(blockedOriginRequests, 0, 'changing the configured platform must not forward cached credentials')
   console.log('Verified Electron HyperWeave network boundary: same-origin allowed; external request, navigation, and popup denied.')
 } finally {
   if (app) await app.close()

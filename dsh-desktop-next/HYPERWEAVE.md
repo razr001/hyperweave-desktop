@@ -10,6 +10,8 @@ Configure the platform URL with `HYPERWEAVE_PLATFORM_URL` or create `hyperweave-
 
 Only HTTPS is accepted except for loopback development addresses. API, role Agent profiles, Skills, plugins, knowledge bases, task events, approvals, and artifacts all come from this origin. Email/password login and refresh tokens are handled by the main process; refresh tokens are encrypted with Electron `safeStorage` when the OS provides it. The desktop configuration contains only the platform URL.
 
+Persisted sessions are bound to the configured platform origin. Changing that origin requires a new login; older session files without an origin binding are also ignored. Concurrent API and download requests share one token refresh. A temporary refresh failure keeps the session for retry, while an invalid refresh token clears it. A late refresh response cannot restore a session after logout.
+
 The upload picker accepts the platform's supported formats: PDF, DOCX, PPTX, XLSX, PNG and JPEG, up to 100 MB per file. Other extensions are rejected before creating remote documents.
 
 The workbench reads `/api/skills/catalog`, which returns only enabled, published Skills allowed for the authenticated tenant role. Plugin choices come from `/api/agent/plugins/catalog`. The platform validates every new role binding against these eligibility rules; execution still checks current permissions and revocation. Retained unavailable bindings are displayed in the editor so users can remove them without losing the rest of their role configuration.

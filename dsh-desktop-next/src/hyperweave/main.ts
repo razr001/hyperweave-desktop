@@ -12,25 +12,29 @@ const SETTINGS_FILE = 'hyperweave-desktop.json'
 const TOKENS_FILE = 'hyperweave-session.bin'
 let platformUrl = ''
 let tokens: StoredTokens | undefined
+let sessionGeneration = 0
+let refreshing: { session: StoredTokens; promise: Promise<void> } | undefined
 
 function tokenPath(): string { return join(app.getPath('userData'), TOKENS_FILE) }
 
 async function loadTokens(): Promise<void> {
   if (!safeStorage.isEncryptionAvailable()) return
   try {
-    tokens = JSON.parse(safeStorage.decryptString(await readFile(tokenPath()))) as StoredTokens
-    if (typeof tokens.accessToken !== 'string' || typeof tokens.refreshToken !== 'string') tokens = undefined
+    const stored = JSON.parse(safeStorage.decryptString(await readFile(tokenPath()))) as StoredTokens & { platformOrigin?: string }
+    if (stored.platformOrigin === new URL(platformUrl).origin
+      && typeof stored.accessToken === 'string' && typeof stored.refreshToken === 'string') tokens = stored
   } catch { tokens = undefined }
 }
 
 async function saveTokens(value: StoredTokens): Promise<void> {
   tokens = value
   if (safeStorage.isEncryptionAvailable()) {
-    await writeFile(tokenPath(), safeStorage.encryptString(JSON.stringify(value)), { mode: 0o600 })
+    await writeFile(tokenPath(), safeStorage.encryptString(JSON.stringify({ ...value, platformOrigin: new URL(platformUrl).origin })), { mode: 0o600 })
   }
 }
 
 async function clearTokens(): Promise<void> {
+  sessionGeneration++
   tokens = undefined
   await rm(tokenPath(), { force: true })
 }
@@ -104,23 +108,20 @@ async function requestPlatform(path: string, init: RequestInit = {}, retryAuth =
   if (target.origin !== new URL(platformUrl).origin) throw new TypeError('请求地址超出管理员配置的平台')
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
-  const publicAuthPath = path.includes('/tenant/auth/login') || path.includes('/tenant/auth/refresh')
+  const publicAuthPath = path === '/api/tenant/auth/login' || path === '/api/tenant/auth/refresh'
+  const requestTokens = tokens
+  const requestGeneration = sessionGeneration
   if (tokens?.accessToken && !publicAuthPath) {
     headers.set('Authorization', `Bearer ${tokens.accessToken}`)
   }
   const response = await fetch(target, { ...init, headers, redirect: 'manual' })
   if (response.status >= 300 && response.status < 400) throw new Error('平台接口拒绝跨站重定向')
-  if (response.status === 401 && retryAuth && tokens?.refreshToken && !publicAuthPath) {
-    const refreshed = await requestPlatform('/api/tenant/auth/refresh', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: tokens.refreshToken }),
-    }, false) as { access_token?: string; refresh_token?: string }
-    if (!refreshed.access_token || !refreshed.refresh_token) {
-      await clearTokens()
-      throw new Error('登录已失效，请重新登录')
-    }
-    await saveTokens({ accessToken: refreshed.access_token, refreshToken: refreshed.refresh_token })
+  if (response.status === 401 && retryAuth && requestTokens && !publicAuthPath) {
+    await refreshSession(requestTokens, requestGeneration)
     return requestPlatform(path, init, false)
+  }
+  if (response.status === 401 && publicAuthPath && path === '/api/tenant/auth/refresh') {
+    throw new Error('登录已失效，请重新登录')
   }
   if (!response.ok) {
     const message = await response.text().catch(() => '')
@@ -134,25 +135,43 @@ async function requestPlatform(path: string, init: RequestInit = {}, retryAuth =
   return payload
 }
 
+async function refreshSession(previous: StoredTokens, generation: number): Promise<void> {
+  // A late 401 can belong to an older session. Never refresh or revive that session.
+  if (!tokens || generation !== sessionGeneration) throw new Error('登录已失效，请重新登录')
+  if (tokens !== previous) return
+  if (refreshing?.session === previous) return refreshing.promise
+  const pending = (async () => {
+    try {
+      const refreshed = await requestPlatform('/api/tenant/auth/refresh', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: previous.refreshToken }),
+      }, false) as { access_token?: string; refresh_token?: string }
+      if (tokens !== previous) throw new Error('登录已失效，请重新登录')
+      if (!refreshed.access_token || !refreshed.refresh_token) throw new Error('登录已失效，请重新登录')
+      await saveTokens({ accessToken: refreshed.access_token, refreshToken: refreshed.refresh_token })
+    } catch (error) {
+      if (tokens === previous && error instanceof Error && /登录已失效/u.test(error.message)) await clearTokens()
+      throw error
+    }
+  })()
+  refreshing = { session: previous, promise: pending }
+  try { await pending }
+  finally { if (refreshing?.promise === pending) refreshing = undefined }
+}
+
 async function savePlatformArtifact(path: string, fileName: string, retryAuth = true): Promise<boolean> {
   if (!path.startsWith('/api/') || path.startsWith('//')) throw new TypeError('仅允许 HyperWeave /api 接口')
   const target = new URL(path, platformUrl)
   if (target.origin !== new URL(platformUrl).origin) throw new TypeError('请求地址超出管理员配置的平台')
   // Result endpoints produce text/plain; artifacts may use their original MIME type.
   const headers = new Headers({ Accept: '*/*' })
+  const requestTokens = tokens
+  const requestGeneration = sessionGeneration
   if (tokens?.accessToken) headers.set('Authorization', `Bearer ${tokens.accessToken}`)
   const response = await fetch(target, { headers, redirect: 'manual' })
   if (response.status >= 300 && response.status < 400) throw new Error('平台接口拒绝跨站重定向')
-  if (response.status === 401 && retryAuth && tokens?.refreshToken) {
-    const refreshed = await requestPlatform('/api/tenant/auth/refresh', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: tokens.refreshToken }),
-    }, false) as { access_token?: string; refresh_token?: string }
-    if (!refreshed.access_token || !refreshed.refresh_token) {
-      await clearTokens()
-      throw new Error('登录已失效，请重新登录')
-    }
-    await saveTokens({ accessToken: refreshed.access_token, refreshToken: refreshed.refresh_token })
+  if (response.status === 401 && retryAuth && requestTokens) {
+    await refreshSession(requestTokens, requestGeneration)
     return savePlatformArtifact(path, fileName, false)
   }
   if (!response.ok) throw new Error(`下载失败 (${response.status})`)
@@ -181,6 +200,7 @@ function registerPlatformIpc(): void {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentials),
     }) as { access_token?: string; refresh_token?: string; user?: unknown }
     if (!session.access_token || !session.refresh_token || !session.user) throw new Error('平台登录响应无效')
+    sessionGeneration++
     await saveTokens({ accessToken: session.access_token, refreshToken: session.refresh_token })
     return session.user
   })
