@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
+import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { HyperWeaveApiError, HyperWeaveClient } from '../src/hyperweave/client.ts'
 import { HyperWeaveAgentProvider } from '../src/hyperweave/agent-runtime.ts'
 import { isAllowedPlatformRequest } from '../src/hyperweave/request-policy.ts'
@@ -47,13 +49,16 @@ describe('HyperWeaveClient', () => {
 describe('HyperWeave desktop network boundary', () => {
   it('allows only the configured origin and renderer-local data URLs', () => {
     const origin = 'https://hw.example.test'
+    const uiRoot = resolve('workbench')
+    const uiIndex = pathToFileURL(resolve(uiRoot, 'main.js')).href
+    const privateFile = pathToFileURL(resolve('private.txt')).href
     expect(isAllowedPlatformRequest(origin, 'https://hw.example.test/api/agent/tasks')).toBe(true)
     expect(isAllowedPlatformRequest(origin, 'blob:https://hw.example.test/123')).toBe(true)
     expect(isAllowedPlatformRequest(origin, 'data:image/svg+xml;base64,AAAA')).toBe(true)
     expect(isAllowedPlatformRequest(origin, 'https://cdn.example.test/app.js')).toBe(false)
     expect(isAllowedPlatformRequest(origin, 'https://hw.example.test.evil.test/api')).toBe(false)
-    expect(isAllowedPlatformRequest(origin, 'file:///C:/private.txt')).toBe(false)
-    expect(isAllowedPlatformRequest(origin, 'file:///C:/workbench/main.js', 'C:/workbench')).toBe(true)
-    expect(isAllowedPlatformRequest(origin, 'file:///C:/private.txt', 'C:/workbench')).toBe(false)
+    expect(isAllowedPlatformRequest(origin, privateFile, uiRoot)).toBe(false)
+    expect(isAllowedPlatformRequest(origin, uiIndex, uiRoot)).toBe(true)
+    expect(isAllowedPlatformRequest(origin, privateFile, uiRoot)).toBe(false)
   })
 })
