@@ -9,7 +9,9 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 const appDir = join(root, '.hyperweave-package')
 await mkdir(appDir, { recursive: true })
 const require = createRequire(import.meta.url)
-const electronDist = join(dirname(require.resolve('electron')), 'dist')
+// Yarn disables lifecycle scripts; Electron downloads its checked distribution on first require.
+require('electron')
+const electronDist = process.env.ELECTRON_OVERRIDE_DIST_PATH || join(dirname(require.resolve('electron')), 'dist')
 // electron-builder removes the top-level Electron notices on macOS.
 // Carry them as explicit resources so every distribution retains both notices.
 await copyFile(join(electronDist, 'LICENSE'), join(appDir, 'LICENSE.electron.txt'))
